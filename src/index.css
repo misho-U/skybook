@@ -1,0 +1,43 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-slate-50 text-slate-800 antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  /* Subtle custom scrollbar */
+  ::-webkit-scrollbar       { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-slate-300 rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-slate-400; }
+}
+
+@layer utilities {
+  /* Card lift — used on FlightCard, feature cards */
+  .card-hover {
+    @apply transition-all duration-300;
+  }
+  .card-hover:hover {
+    @apply -translate-y-1 shadow-lg;
+  }
+
+  /* Button press feel */
+  .btn-press {
+    @apply transition-all duration-150 active:scale-[0.97];
+  }
+
+  /* Staggered animation helper — apply delay via inline style */
+  .animate-stagger {
+    animation-fill-mode: both;
+  }
+}
