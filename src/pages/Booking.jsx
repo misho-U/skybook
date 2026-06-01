@@ -161,6 +161,11 @@ export default function Booking() {
         }
       )
 
+      // Wipe sentinels from any previous successful payment so /payment's
+      // post-finalize tail-redirect check can't fire on this fresh booking.
+      sessionStorage.removeItem('flitt_order_id')
+      sessionStorage.removeItem('payment_finalized')
+
       sessionStorage.setItem('pending_booking', JSON.stringify({
         tripType,
         adults,
@@ -173,7 +178,7 @@ export default function Booking() {
         returnFlightId:   isRoundTrip ? returnId : null,
         outboundSeatIds:  outboundSeats.map(s => s.id),
         returnSeatIds:    returnSeats.map(s => s.id),
-        // Full flight/seat objects so PaymentResult can render success + email
+        // Full flight/seat objects so Payment can render success + email
         outboundFlight,
         returnFlight:     isRoundTrip ? returnFlight : null,
         outboundSeats,

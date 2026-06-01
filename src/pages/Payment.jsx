@@ -61,10 +61,16 @@ export default function Payment() {
   // `payment_finalized` to the same order_id we still have in sessionStorage.
   // When Flitt's 5–10s tail redirect lands us back here, we recognise the
   // pattern and bounce to /my-bookings before any UI mounts.
+  //
+  // IMPORTANT: only treat this as a tail-redirect when there is NO fresh
+  // `pending_booking` in sessionStorage. Otherwise we'd incorrectly bounce
+  // a user who's starting a NEW booking right after a previous one finished
+  // (stale `flitt_order_id` + `payment_finalized` linger after success).
   const [isPostFinalizeTail] = useState(() => {
-    const oid = sessionStorage.getItem('flitt_order_id')
-    const fin = sessionStorage.getItem('payment_finalized')
-    return Boolean(oid && fin && oid === fin)
+    const oid     = sessionStorage.getItem('flitt_order_id')
+    const fin     = sessionStorage.getItem('payment_finalized')
+    const pending = sessionStorage.getItem('pending_booking')
+    return Boolean(oid && fin && oid === fin && !pending)
   })
 
   // 'idle' | 'finalizing' | 'success' | 'failed' | 'timeout'
