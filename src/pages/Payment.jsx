@@ -117,15 +117,21 @@ export default function Payment() {
       // Note: we deliberately don't send responseUrl from here. The edge fn
       // routes Flitt's POST through a redirect bridge (a SPA can't accept POST).
       // The bridge ultimately lands the browser back on /payment via GET.
+      const requestBody = {
+        tripId:    orderId,
+        amount:    pending.total,
+        orderDesc: `SkyBook Flight Booking ${orderId.slice(0, 8).toUpperCase()}`,
+      }
+      console.log('[Payment] create-flitt-order request body:', requestBody)
+      console.log('[Payment] field-by-field:',
+        '\n  tripId   :', requestBody.tripId,
+        '\n  amount   :', requestBody.amount, `(${typeof requestBody.amount})`,
+        '\n  orderDesc:', requestBody.orderDesc,
+      )
+
       const { data: tokenData, error: fnErr } = await supabase.functions.invoke(
         'create-flitt-order',
-        {
-          body: {
-            tripId:    orderId,
-            amount:    pending.total,
-            orderDesc: `SkyBook Flight Booking ${orderId.slice(0, 8).toUpperCase()}`,
-          },
-        },
+        { body: requestBody },
       )
 
       if (cancelled) return
