@@ -195,7 +195,7 @@ export default function Payment() {
     //   (b) Direct query to Flitt's order-status API after 10 s of silence
     const urlStatus = new URLSearchParams(window.location.search).get('order_status')
     const URL_APPROVAL_AFTER     = 3       // polls (~1.5 s) before trusting URL
-    const FLITT_API_CHECK_AFTER  = 10000   // ms before hitting Flitt's status API
+    const FLITT_API_CHECK_AFTER  = 3000    // ms before hitting Flitt's status API
     const startedAt              = Date.now()
 
     const pollOnce = async () => {
