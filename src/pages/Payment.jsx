@@ -61,8 +61,9 @@ export default function Payment() {
   const [bookingRef,   setBookingRef]   = useState(null)
   const [errorMsg,     setErrorMsg]     = useState(null)
 
-  const initialized = useRef(false)
-  const finalized   = useRef(false)
+  const initialized      = useRef(false)
+  const finalized        = useRef(false)
+  const flittApiChecked  = useRef(false)   // we only hit Flitt's status API once
 
   // ── 1. Hydrate pending booking from sessionStorage ──────────────────────────
   useEffect(() => {
@@ -188,14 +189,21 @@ export default function Payment() {
     let attempts  = 0
     let timeoutHandle
 
-    // URL-based escape hatch for sandbox mode where server_callback never fires
+    // Two independent escape hatches for sandbox mode where server_callback
+    // never fires:
+    //   (a) URL params from the Flitt redirect (if present)
+    //   (b) Direct query to Flitt's order-status API after 10 s of silence
     const urlStatus = new URLSearchParams(window.location.search).get('order_status')
-    const URL_APPROVAL_AFTER = 3   // polls before we trust the URL outright (≈1.5s)
+    const URL_APPROVAL_AFTER     = 3       // polls (~1.5 s) before trusting URL
+    const FLITT_API_CHECK_AFTER  = 10000   // ms before hitting Flitt's status API
+    const startedAt              = Date.now()
 
     const pollOnce = async () => {
       if (cancelled) return
       attempts++
+      const elapsed = Date.now() - startedAt
 
+      // ── 1. Standard payment_intents poll ─────────────────────────────────
       const { data, error } = await supabase
         .from('payment_intents')
         .select('status')
@@ -209,32 +217,64 @@ export default function Payment() {
       }
 
       const status = data?.status
+      if (status === 'approved') { await handleApproved(); return }
+      if (status === 'declined') { handleDeclined();        return }
 
-      if (status === 'approved') {
-        await handleApproved()
-        return
-      }
-      if (status === 'declined') {
-        handleDeclined()
-        return
-      }
-
-      // Sandbox fallback: if Flitt redirected us back with approved/declined
-      // in the URL and the row STILL hasn't been updated after a few polls
-      // (callback isn't firing in test mode), trust the URL.
-      if (resumedFromRedirect && attempts >= URL_APPROVAL_AFTER) {
+      // ── 2. URL-based fallback (only when the redirect carried a status) ──
+      if (urlStatus && resumedFromRedirect && attempts >= URL_APPROVAL_AFTER) {
         if (urlStatus === 'approved') {
           console.warn('[Payment] No DB update after', attempts, 'polls — trusting URL order_status=approved')
           await handleApproved()
           return
         }
-        if (urlStatus && ['declined', 'expired', 'reversed'].includes(urlStatus)) {
+        if (['declined', 'expired', 'reversed'].includes(urlStatus)) {
           console.warn('[Payment] URL order_status indicates failure:', urlStatus)
           handleDeclined()
           return
         }
       }
 
+      // ── 3. Flitt API direct check ────────────────────────────────────────
+      // Fires once, when:
+      //   - we've been polling > 10 s
+      //   - the URL has NO order_status (otherwise the URL fallback handles it)
+      //   - the DB row is still 'pending'
+      //   - we have a flitt_order_id to query
+      if (!urlStatus && flittOrderId && !flittApiChecked.current && elapsed >= FLITT_API_CHECK_AFTER) {
+        flittApiChecked.current = true
+        console.log('[Payment] No status after', elapsed, 'ms — querying Flitt API directly for order', flittOrderId)
+
+        try {
+          const { data: apiData, error: apiErr } = await supabase.functions.invoke(
+            'check-flitt-status',
+            { body: { orderId: flittOrderId } },
+          )
+
+          if (cancelled) return
+
+          if (apiErr) {
+            console.warn('[Payment] check-flitt-status invocation error:', apiErr)
+          } else {
+            console.log('[Payment] Flitt API result:', apiData)
+            const apiStatus = apiData?.order_status
+            if (apiStatus === 'approved') {
+              console.log('[Payment] Flitt API says approved → finalizing')
+              await handleApproved()
+              return
+            }
+            if (apiStatus && ['declined', 'expired', 'reversed'].includes(apiStatus)) {
+              console.log('[Payment] Flitt API says', apiStatus, '→ failing')
+              handleDeclined()
+              return
+            }
+            // anything else (processing, created, …) → keep polling payment_intents
+          }
+        } catch (err) {
+          console.warn('[Payment] check-flitt-status threw:', err)
+        }
+      }
+
+      // ── 4. Hard timeout ──────────────────────────────────────────────────
       if (attempts >= POLL_MAX_ATTEMPTS) {
         setPaymentState('timeout')
         setErrorMsg('Payment is taking longer than expected. If you completed the payment, your booking will appear in My Bookings shortly.')
