@@ -21,6 +21,7 @@ function sortFlights(flights, sort) {
       const db = new Date(b.arrival_time) - new Date(b.departure_time)
       return da - db
     }
+    if (sort === 'departure') return new Date(a.departure_time) - new Date(b.departure_time)
     return 0
   })
 }
@@ -55,7 +56,7 @@ function EmptyColumn({ label }) {
   )
 }
 
-function FlightColumn({ title, subtitle, flights, selected, onSelect, sort, emptyLabel }) {
+function FlightColumn({ title, subtitle, note, flights, selected, onSelect, sort, emptyLabel }) {
   const sorted = useMemo(() => sortFlights(flights, sort), [flights, sort])
   return (
     <div className="flex-1 min-w-0">
@@ -63,6 +64,11 @@ function FlightColumn({ title, subtitle, flights, selected, onSelect, sort, empt
         <h2 className="text-base font-bold text-slate-800">{title}</h2>
         {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
       </div>
+      {note && (
+        <p className="text-xs text-slate-500 italic mb-3 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+          {note}
+        </p>
+      )}
       {sorted.length === 0
         ? <EmptyColumn label={emptyLabel} />
         : (
@@ -147,12 +153,13 @@ export default function SearchResults() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
 
-  const [sort,         setSort]         = useState('price-asc')
-  const [allFlights,   setAllFlights]   = useState([])
-  const [loading,      setLoading]      = useState(true)
-  const [error,        setError]        = useState(null)
-  const [selectedOut,  setSelectedOut]  = useState(null)
-  const [selectedRet,  setSelectedRet]  = useState(null)
+  const [sort,            setSort]            = useState('price-asc')
+  const [allFlights,      setAllFlights]      = useState([])
+  const [rawReturnFlights,setRawReturnFlights] = useState([])
+  const [loading,         setLoading]         = useState(true)
+  const [error,           setError]           = useState(null)
+  const [selectedOut,     setSelectedOut]     = useState(null)
+  const [selectedRet,     setSelectedRet]     = useState(null)
 
   const origin      = searchParams.get('origin')      || ''
   const destination = searchParams.get('destination') || ''
@@ -166,7 +173,7 @@ export default function SearchResults() {
 
   usePageTitle(destination ? `Flights to ${destination}` : 'Search Results')
 
-  // Fetch flights covering both the departure date and (if round-trip) return date
+  // Two independent queries: outbound (departure-date filtered) and return (separate).
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -174,31 +181,44 @@ export default function SearchResults() {
     setSelectedOut(null)
     setSelectedRet(null)
 
-    // Build a date range that covers departure through return (or just departure day)
-    const rangeStart = departure  ? `${departure}T00:00:00+00`  : null
-    const rangeEnd   = returnDate ? `${returnDate}T23:59:59+00` : departure ? `${departure}T23:59:59+00` : null
+    const SEL = '*, origin:airports!fk_origin(*), destination:airports!fk_destination(*)'
 
-    let query = supabase
-      .from('flights')
-      .select(`
-        *,
-        origin:airports!fk_origin(*),
-        destination:airports!fk_destination(*)
-      `)
-      .order('departure_time')
+    // ── Outbound: filter to departure date when set ──
+    let outQ = supabase.from('flights').select(SEL).order('departure_time')
+    if (departure) {
+      outQ = outQ
+        .gte('departure_time', `${departure}T00:00:00+00`)
+        .lte('departure_time', `${departure}T23:59:59+00`)
+    }
 
-    if (rangeStart) query = query.gte('departure_time', rangeStart)
-    if (rangeEnd)   query = query.lte('departure_time', rangeEnd)
+    // ── Return: completely separate query, different date constraints ──
+    // When returnDate is set → filter to that day only.
+    // When returnDate is empty → fetch all return flights from departure onwards
+    //   (no upper bound — user will pick the date from the results).
+    let retPromise = Promise.resolve({ data: [], error: null })
+    if (isRoundTrip) {
+      let retQ = supabase.from('flights').select(SEL).order('departure_time')
+      if (returnDate) {
+        retQ = retQ
+          .gte('departure_time', `${returnDate}T00:00:00+00`)
+          .lte('departure_time', `${returnDate}T23:59:59+00`)
+      } else if (departure) {
+        retQ = retQ.gte('departure_time', `${departure}T00:00:00+00`)
+        // No .lte() — show all available return dates
+      }
+      retPromise = retQ
+    }
 
-    query.then(({ data, error: err }) => {
+    Promise.all([outQ, retPromise]).then(([outResult, retResult]) => {
       if (cancelled) return
-      if (err) { setError(err.message); setLoading(false); return }
-      setAllFlights((data ?? []).map(normalizeDbFlight))
+      if (outResult.error) { setError(outResult.error.message); setLoading(false); return }
+      setAllFlights((outResult.data ?? []).map(normalizeDbFlight))
+      setRawReturnFlights((retResult.data ?? []).map(normalizeDbFlight))
       setLoading(false)
     })
 
     return () => { cancelled = true }
-  }, [departure, returnDate])
+  }, [departure, returnDate, isRoundTrip])
 
   function handleDateParam(key, value) {
     setSearchParams(prev => {
@@ -219,16 +239,44 @@ export default function SearchResults() {
     })
   }, [allFlights, departure, destination, origin])
 
-  // Return: origin/destination are swapped
+  // Return: filter rawReturnFlights by route (date already handled in the query)
   const returnFlights = useMemo(() => {
     if (!isRoundTrip) return []
-    return allFlights.filter(f => {
-      const onDate = !returnDate || f.departure_time.slice(0, 10) === returnDate
+    return rawReturnFlights.filter(f => {
       const destOk = matchesCity(f, origin, 'destination')
       const origOk = matchesCity(f, destination, 'origin')
-      return onDate && destOk && (destination ? origOk : true)
+      return destOk && (destination ? origOk : true)
     })
-  }, [allFlights, returnDate, origin, destination, isRoundTrip])
+  }, [rawReturnFlights, origin, destination, isRoundTrip])
+
+  // Available dates for the sidebar DatePickers.
+  // null while loading → DatePicker stays in optimistic mode (all dates clickable).
+  // After load → Set of YYYY-MM-DD strings with actual flights; DatePicker grays the rest.
+  const availableDepartureDates = useMemo(() => {
+    if (loading) return null
+    return new Set(
+      allFlights
+        .filter(f => {
+          const destOk = matchesCity(f, destination, 'destination')
+          const origOk = matchesCity(f, origin, 'origin')
+          return destOk && (origin ? origOk : true)
+        })
+        .map(f => f.departure_time.slice(0, 10))
+    )
+  }, [allFlights, loading, destination, origin])
+
+  const availableReturnDates = useMemo(() => {
+    if (loading || !isRoundTrip) return null
+    return new Set(
+      rawReturnFlights
+        .filter(f => {
+          const destOk = matchesCity(f, origin, 'destination')
+          const origOk = matchesCity(f, destination, 'origin')
+          return destOk && (destination ? origOk : true)
+        })
+        .map(f => f.departure_time.slice(0, 10))
+    )
+  }, [rawReturnFlights, loading, isRoundTrip, origin, destination])
 
   const departureLbl  = departure  ? formatSearchDate(departure)  : null
   const returnLbl     = returnDate ? formatSearchDate(returnDate)  : null
@@ -330,7 +378,7 @@ export default function SearchResults() {
                       <label className="block text-xs text-slate-400 font-medium mb-1">Departure</label>
                       <DatePicker
                         value={departure}
-                        availableDates={null}
+                        availableDates={availableDepartureDates}
                         onSelect={v => handleDateParam('departure', v)}
                         placeholder="Any date"
                       />
@@ -340,7 +388,7 @@ export default function SearchResults() {
                         <label className="block text-xs text-slate-400 font-medium mb-1">Return</label>
                         <DatePicker
                           value={returnDate}
-                          availableDates={null}
+                          availableDates={availableReturnDates}
                           onSelect={v => handleDateParam('return', v)}
                           placeholder="Any date"
                         />
@@ -373,10 +421,11 @@ export default function SearchResults() {
                 <FlightColumn
                   title="Return"
                   subtitle={returnLbl ? `${destination || '—'} → ${origin || '—'} · ${returnLbl}` : `${destination || '—'} → ${origin || '—'}`}
+                  note={!returnDate ? 'All available return dates — select one to continue' : undefined}
                   flights={returnFlights}
                   selected={selectedRet}
                   onSelect={setSelectedRet}
-                  sort={sort}
+                  sort={!returnDate ? 'departure' : sort}
                   emptyLabel="No return flights found"
                 />
               </div>

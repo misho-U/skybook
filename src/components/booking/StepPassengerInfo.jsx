@@ -2,9 +2,15 @@ import { useState } from 'react'
 
 export const TYPE_LABEL = { adult: 'Adult', child: 'Child', infant: 'Infant' }
 export const TYPE_BADGE = {
-  adult:  'bg-blue-100 text-blue-700',
-  child:  'bg-green-100 text-green-700',
-  infant: 'bg-orange-100 text-orange-700',
+  adult:  'bg-blue-100 text-blue-800 ring-1 ring-blue-200',
+  child:  'bg-green-100 text-green-800 ring-1 ring-green-200',
+  infant: 'bg-orange-100 text-orange-800 ring-1 ring-orange-200',
+}
+
+const CARD_ACCENT = {
+  adult:  'border-l-blue-400 bg-blue-50/40',
+  child:  'border-l-green-400 bg-green-50/40',
+  infant: 'border-l-orange-400 bg-orange-50/40',
 }
 
 const MONTH_NAMES = [
@@ -115,7 +121,6 @@ export default function StepPassengerInfo({
     e.preventDefault()
     const errs = {}
     passengers.forEach((p, i) => {
-      console.log(`[DOB debug] passenger ${i} (${p.type}):`, JSON.stringify(p.dob))
       if (!p.firstName.trim()) errs[`${i}.firstName`] = 'Required'
       if (!p.lastName.trim())  errs[`${i}.lastName`]  = 'Required'
       if (!isValidDob(p.dob))  errs[`${i}.dob`]       = 'Please select a complete date of birth'
@@ -142,9 +147,9 @@ export default function StepPassengerInfo({
     <form onSubmit={handleSubmit} noValidate>
       <div className="space-y-5">
         {passengers.map((p, i) => (
-          <div key={i} className="border border-slate-100 rounded-2xl p-4">
+          <div key={i} className={`border border-slate-100 border-l-4 rounded-2xl p-4 ${CARD_ACCENT[p.type]}`}>
             <div className="flex items-center gap-2 mb-4">
-              <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${TYPE_BADGE[p.type]}`}>
+              <span className={`text-sm font-bold px-3 py-1.5 rounded-full ${TYPE_BADGE[p.type]}`}>
                 {TYPE_LABEL[p.type]} {typeIndex[i]}
               </span>
               {p.type === 'infant' && (

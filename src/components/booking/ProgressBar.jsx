@@ -11,9 +11,9 @@ export default function ProgressBar({ steps, current }) {
               <div className={`
                 w-10 h-10 rounded-full flex items-center justify-center
                 font-bold text-sm border-2 transition-all duration-300
-                ${done   ? 'bg-blue-600 border-blue-600 text-white'
-                : active ? 'bg-white border-blue-600 text-blue-600 ring-4 ring-blue-100'
-                :          'bg-white border-slate-200 text-slate-400'}
+                ${done   ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-300/50'
+                : active ? 'bg-blue-600 border-blue-600 text-white ring-4 ring-blue-200 scale-110 shadow-lg shadow-blue-400/50'
+                :          'bg-slate-100 border-slate-200 text-slate-400'}
               `}>
                 {done
                   ? <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -29,7 +29,7 @@ export default function ProgressBar({ steps, current }) {
             </div>
             {i < steps.length - 1 && (
               <div className={`h-0.5 w-10 sm:w-14 mx-2 rounded-full transition-all duration-500 ${
-                n < current ? 'bg-blue-500' : 'bg-slate-200'
+                n < current ? 'bg-gradient-to-r from-blue-500 to-blue-400' : 'bg-slate-200'
               }`} />
             )}
           </div>

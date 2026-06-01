@@ -1,4 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+/* Inter loaded via <link> in index.html — @import kept as fallback */
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..900;1,14..32,300..900&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -15,7 +16,6 @@
     @apply bg-slate-50 text-slate-800 antialiased;
     font-family: 'Inter', system-ui, sans-serif;
   }
-  /* Subtle custom scrollbar */
   ::-webkit-scrollbar       { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { @apply bg-slate-300 rounded-full; }
@@ -23,21 +23,33 @@
 }
 
 @layer utilities {
-  /* Card lift — used on FlightCard, feature cards */
+  /* Card lift */
   .card-hover {
     @apply transition-all duration-300;
   }
   .card-hover:hover {
-    @apply -translate-y-1 shadow-lg;
+    @apply -translate-y-1.5 shadow-xl;
   }
 
-  /* Button press feel */
+  /* Button press feel + hover lift */
   .btn-press {
-    @apply transition-all duration-150 active:scale-[0.97];
+    @apply transition-all duration-200 active:scale-[0.97];
   }
 
-  /* Staggered animation helper — apply delay via inline style */
+  /* CTA buttons get a scale lift on hover */
+  .btn-primary {
+    @apply btn-press hover:scale-[1.03] hover:shadow-lg;
+  }
+
+  /* Staggered animation helper */
   .animate-stagger {
     animation-fill-mode: both;
+  }
+
+  /* Skeleton shimmer */
+  .skeleton {
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
   }
 }

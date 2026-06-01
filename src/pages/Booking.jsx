@@ -1,9 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../context/ToastContext'
 import { usePageTitle } from '../hooks/usePageTitle'
-import { FLIGHT_SELECT, getLocalTrips } from '../lib/queries'
+import { FLIGHT_SELECT } from '../lib/queries'
+import { getSeatSurcharge } from '../components/SeatMap'
+import { luggagePrice } from '../components/LuggageSelector'
+import { formatPrice, formatDayMonth } from '../utils/format'
 import { useRequireAuth } from '../hooks/useRequireAuth'
 import ProgressBar      from '../components/booking/ProgressBar'
 import FlightHeader     from '../components/booking/FlightHeader'
@@ -11,6 +14,38 @@ import StepSeatSelection  from '../components/booking/StepSeatSelection'
 import StepLuggage        from '../components/booking/StepLuggage'
 import StepPassengerInfo  from '../components/booking/StepPassengerInfo'
 import StepConfirmation   from '../components/booking/StepConfirmation'
+
+function StickyFlightBar({ outboundFlight, isRoundTrip, adults, children, infants, total }) {
+  const origin = outboundFlight?.origin?.code ?? '—'
+  const dest   = outboundFlight?.destination?.city ?? '—'
+  const date   = outboundFlight ? formatDayMonth(outboundFlight.departure_time) : ''
+  const pax    = [
+    `${adults} adult${adults !== 1 ? 's' : ''}`,
+    children > 0 && `${children} child${children !== 1 ? 'ren' : ''}`,
+    infants  > 0 && `${infants} infant${infants !== 1 ? 's' : ''}`,
+  ].filter(Boolean).join(', ')
+
+  return (
+    <div className="sticky top-16 z-40 bg-white/95 backdrop-blur-sm border-b border-slate-100 shadow-sm">
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-2.5 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0 text-sm">
+          <span className="font-bold text-slate-800 shrink-0">
+            {origin} → {dest}{isRoundTrip ? ' ↔' : ''}
+          </span>
+          {date && (
+            <>
+              <span className="text-slate-300 hidden sm:inline">·</span>
+              <span className="text-slate-500 hidden sm:inline shrink-0">{date}</span>
+            </>
+          )}
+          <span className="text-slate-300 hidden sm:inline">·</span>
+          <span className="text-slate-500 hidden sm:inline truncate">{pax}</span>
+        </div>
+        <span className="font-extrabold text-blue-600 text-base shrink-0">{formatPrice(total)}</span>
+      </div>
+    </div>
+  )
+}
 
 function buildSteps(isRoundTrip) {
   return isRoundTrip
@@ -56,6 +91,13 @@ export default function Booking() {
   const [isConfirming, setIsConfirming] = useState(false)
   const [seatError,    setSeatError]   = useState(null)
 
+  const runningTotal = useMemo(() => {
+    const base      = (Number(outboundFlight?.base_price ?? 0) + (isRoundTrip ? Number(returnFlight?.base_price ?? 0) : 0)) * seatsNeeded
+    const seatExtra = [...outboundSeats, ...returnSeats].reduce((s, seat) => s + getSeatSurcharge(seat), 0)
+    const lugExtra  = luggage.reduce((s, l) => s + luggagePrice(l.outbound) + (isRoundTrip ? luggagePrice(l.return) : 0), 0)
+    return base + seatExtra + lugExtra
+  }, [outboundFlight, returnFlight, isRoundTrip, seatsNeeded, outboundSeats, returnSeats, luggage])
+
   useEffect(() => {
     if (user?.email) setContact(prev => ({ ...prev, email: prev.email || user.email }))
   }, [user?.email])
@@ -85,7 +127,14 @@ export default function Booking() {
     })
   }, [outboundId, returnId, isRoundTrip])
 
-  const isAlreadyBooked = getLocalTrips().some(t => t.outboundFlightId === outboundId)
+  // Non-blocking: just a flag so we can show an info banner.
+  // The user can still complete the booking — FlightCard already warned them.
+  const bookedFlightIds = (() => {
+    try { return JSON.parse(localStorage.getItem('skybook_flight_ids') || '[]') }
+    catch { return [] }
+  })()
+  const isAlreadyBooked = bookedFlightIds.includes(outboundId)
+    || (isRoundTrip && returnId && bookedFlightIds.includes(returnId))
 
   // Step indices (1-based)
   // One-way:    1=Seat, 2=Luggage, 3=Passenger, 4=Confirm
@@ -95,11 +144,12 @@ export default function Booking() {
   const confirmStep   = isRoundTrip ? 5 : 4
 
   /**
-   * Submits the booking as a single atomic Postgres transaction via the book_trip RPC.
-   * Merges luggage selections into the passengers payload before sending.
-   * On SEAT_TAKEN error, surfaces a user-facing message without navigating away.
+   * Stashes the booking inputs in sessionStorage and navigates to /payment.
+   * The trip is NOT persisted to Supabase yet — that happens in PaymentResult.jsx
+   * only after Flitt approves the payment.  This avoids stranded trip rows when
+   * the user abandons or fails payment.
    */
-  async function handleConfirm() {
+  function handleConfirm(total) {
     setIsConfirming(true)
     setSeatError(null)
     try {
@@ -111,39 +161,27 @@ export default function Booking() {
         }
       )
 
-      const { data: tripId, error } = await supabase.rpc('book_trip', {
-        p_trip_type:     tripType,
-        p_adults:        adults,
-        p_children:      children,
-        p_infants:       infants,
-        p_passengers:    passengersWithLuggage,
-        p_contact_email: contact.email,
-        p_contact_phone: contact.phone,
-        p_user_id:       user?.id ?? null,
-        p_bookings: [
-          ...outboundSeats.map(seat => ({ flight_id: outboundId, seat_id: seat.id, direction: 'outbound' })),
-          ...returnSeats.map(seat  => ({ flight_id: returnId,    seat_id: seat.id, direction: 'return'   })),
-        ],
-      })
+      sessionStorage.setItem('pending_booking', JSON.stringify({
+        tripType,
+        adults,
+        children,
+        infants,
+        passengers:       passengersWithLuggage,
+        contactEmail:     contact.email,
+        contactPhone:     contact.phone,
+        outboundFlightId: outboundId,
+        returnFlightId:   isRoundTrip ? returnId : null,
+        outboundSeatIds:  outboundSeats.map(s => s.id),
+        returnSeatIds:    returnSeats.map(s => s.id),
+        // Full flight/seat objects so PaymentResult can render success + email
+        outboundFlight,
+        returnFlight:     isRoundTrip ? returnFlight : null,
+        outboundSeats,
+        returnSeats,
+        total,
+      }))
 
-      if (error) {
-        if (error.message?.includes('SEAT_TAKEN')) {
-          setSeatError('This seat was just booked by someone else. Please go back and select another.')
-        } else {
-          addToast('Something went wrong. Please try again.', 'error')
-        }
-        setIsConfirming(false)
-        return
-      }
-
-      const tripRef = 'SKY' + Math.random().toString(36).slice(2, 7).toUpperCase()
-      localStorage.setItem('skybook_trips', JSON.stringify([
-        ...getLocalTrips(),
-        { tripRef, tripId, outboundFlightId: outboundId, returnFlightId: returnId || null },
-      ]))
-
-      addToast(`Trip confirmed${isRoundTrip ? ' (round trip)' : ''}! 🎉`)
-      navigate('/my-bookings')
+      navigate('/payment')
     } catch (err) {
       console.error(err)
       addToast('Something went wrong. Please try again.', 'error')
@@ -173,25 +211,32 @@ export default function Booking() {
     )
   }
 
-  if (isAlreadyBooked) {
-    return (
-      <main className="max-w-xl mx-auto px-4 py-24 text-center animate-fade-in">
-        <p className="text-7xl mb-5">✅</p>
-        <h1 className="text-2xl font-bold text-slate-800 mb-2">Already booked!</h1>
-        <p className="text-slate-500 text-sm mb-8">You have an existing booking for this flight.</p>
-        <Link to="/my-bookings" className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 btn-press transition-all">
-          View My Bookings →
-        </Link>
-      </main>
-    )
-  }
-
   return (
+    <>
+    <StickyFlightBar
+      outboundFlight={outboundFlight}
+      isRoundTrip={isRoundTrip}
+      adults={adults}
+      children={children}
+      infants={infants}
+      total={runningTotal}
+    />
     <main className="max-w-2xl mx-auto px-4 sm:px-6 py-10">
       <div className="mb-8">
         <Link to="/results" className="text-sm text-blue-600 hover:text-blue-700 font-semibold transition-colors">
           ← Back to results
         </Link>
+
+        {isAlreadyBooked && (
+          <div className="mt-4 flex items-start gap-2.5 p-3 bg-blue-50 border border-blue-100 rounded-xl animate-fade-in">
+            <span className="text-base leading-none mt-0.5 select-none" aria-hidden="true">ℹ️</span>
+            <p className="text-sm text-blue-700 leading-snug">
+              <span className="font-semibold">You already have a seat on this flight.</span>{' '}
+              You're booking an additional seat.
+            </p>
+          </div>
+        )}
+
         <div className="mt-4 space-y-1.5">
           <FlightHeader flight={outboundFlight} label={isRoundTrip ? 'Outbound' : 'Flight'} accent="blue" />
           {isRoundTrip && returnFlight && (
@@ -294,5 +339,6 @@ export default function Booking() {
         )}
       </div>
     </main>
+    </>
   )
 }

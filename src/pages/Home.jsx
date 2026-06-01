@@ -61,7 +61,7 @@ function DestinationCard({ dest, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className="group text-left bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-all duration-200 w-full"
+      className="group text-left bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-xl hover:shadow-slate-200/70 hover:-translate-y-1 transition-all duration-300 w-full"
     >
       <div className="relative h-44 overflow-hidden">
         <img
@@ -238,6 +238,8 @@ export default function Home() {
     <main>
       {/* ── Hero ── */}
       <section className="relative bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 text-white overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none"
+          style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
         <div className="absolute -top-24 -right-24 w-96 h-96 bg-white/5 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute bottom-0 left-0 w-72 h-72 bg-indigo-900/30 rounded-full blur-3xl pointer-events-none" />
 
@@ -256,7 +258,7 @@ export default function Home() {
           {/* Search card */}
           <form
             onSubmit={handleSubmit}
-            className="bg-white rounded-2xl shadow-2xl p-6 max-w-3xl mx-auto text-left"
+            className="bg-white rounded-3xl shadow-2xl shadow-blue-900/20 p-6 max-w-3xl mx-auto text-left"
           >
             {/* Trip type toggle */}
             <div className="flex gap-1 p-1 bg-slate-100 rounded-xl mb-5 w-fit">
@@ -384,6 +386,7 @@ export default function Home() {
         <FlightDateModal
           destination={selectedDest}
           kutId={kutId}
+          tripType={form.tripType}
           onClose={() => setSelectedDest(null)}
         />
       )}
@@ -403,8 +406,8 @@ export default function Home() {
                 key={title}
                 className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 text-center card-hover group"
               >
-                <div className="text-5xl mb-5 transition-transform duration-300 group-hover:scale-110 inline-block">
-                  {icon}
+                <div className="w-16 h-16 rounded-2xl bg-blue-100 flex items-center justify-center mx-auto mb-5 transition-transform duration-300 group-hover:scale-110 group-hover:bg-blue-200">
+                  <span className="text-3xl">{icon}</span>
                 </div>
                 <h3 className="font-bold text-slate-800 text-lg mb-2">{title}</h3>
                 <p className="text-slate-500 text-sm leading-relaxed">{desc}</p>

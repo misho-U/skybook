@@ -19,10 +19,10 @@ function buildFlightsByDate(flights) {
   return map
 }
 
-export default function FlightDateModal({ destination, kutId, onClose }) {
+export default function FlightDateModal({ destination, kutId, onClose, tripType = 'one_way' }) {
   const navigate = useNavigate()
 
-  const [isOneWay,        setIsOneWay]        = useState(false)
+  const [isOneWay,        setIsOneWay]        = useState(tripType === 'one_way')
   const [departDate,      setDepartDate]      = useState(null)
   const [returnDate,      setReturnDate]      = useState(null)
   const [outboundFlights, setOutboundFlights] = useState(null)

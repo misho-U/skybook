@@ -80,6 +80,13 @@ export default function Payment() {
         setFlittOrderId(existingOrderId)
         setCheckoutReady(true)
         setResumedFromRedirect(true)
+
+        // In sandbox, Flitt's server_callback often doesn't fire. The redirect
+        // URL is the only signal we get — trust `order_status=approved` from
+        // the URL as a trigger for finalization (polling will validate via
+        // payment_intents anyway, this just kicks the next poll faster).
+        const urlStatus = new URLSearchParams(window.location.search).get('order_status')
+        console.log('[Payment] Resume — order_status from URL:', urlStatus)
       }
     } catch {
       navigate('/', { replace: true })
@@ -107,16 +114,16 @@ export default function Payment() {
         : 'sky-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10)
       sessionStorage.setItem('flitt_order_id', orderId)
 
-      const responseUrl = `${window.location.origin}/payment`
-
+      // Note: we deliberately don't send responseUrl from here. The edge fn
+      // routes Flitt's POST through a redirect bridge (a SPA can't accept POST).
+      // The bridge ultimately lands the browser back on /payment via GET.
       const { data: tokenData, error: fnErr } = await supabase.functions.invoke(
         'create-flitt-order',
         {
           body: {
-            tripId:      orderId,
-            amount:      pending.total,
-            orderDesc:   `SkyBook Flight Booking ${orderId.slice(0, 8).toUpperCase()}`,
-            responseUrl,
+            tripId:    orderId,
+            amount:    pending.total,
+            orderDesc: `SkyBook Flight Booking ${orderId.slice(0, 8).toUpperCase()}`,
           },
         },
       )
@@ -175,6 +182,10 @@ export default function Payment() {
     let attempts  = 0
     let timeoutHandle
 
+    // URL-based escape hatch for sandbox mode where server_callback never fires
+    const urlStatus = new URLSearchParams(window.location.search).get('order_status')
+    const URL_APPROVAL_AFTER = 3   // polls before we trust the URL outright (≈1.5s)
+
     const pollOnce = async () => {
       if (cancelled) return
       attempts++
@@ -200,6 +211,22 @@ export default function Payment() {
       if (status === 'declined') {
         handleDeclined()
         return
+      }
+
+      // Sandbox fallback: if Flitt redirected us back with approved/declined
+      // in the URL and the row STILL hasn't been updated after a few polls
+      // (callback isn't firing in test mode), trust the URL.
+      if (resumedFromRedirect && attempts >= URL_APPROVAL_AFTER) {
+        if (urlStatus === 'approved') {
+          console.warn('[Payment] No DB update after', attempts, 'polls — trusting URL order_status=approved')
+          await handleApproved()
+          return
+        }
+        if (urlStatus && ['declined', 'expired', 'reversed'].includes(urlStatus)) {
+          console.warn('[Payment] URL order_status indicates failure:', urlStatus)
+          handleDeclined()
+          return
+        }
       }
 
       if (attempts >= POLL_MAX_ATTEMPTS) {

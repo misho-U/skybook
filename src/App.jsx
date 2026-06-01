@@ -8,6 +8,8 @@ import Login from './pages/Login'
 import MyBookings from './pages/MyBookings'
 import SearchResults from './pages/SearchResults'
 import Booking from './pages/Booking'
+import Payment from './pages/Payment'
+import PaymentResult from './pages/PaymentResult'
 import NotFound from './pages/NotFound'
 
 function ScrollToTop() {
@@ -49,8 +51,10 @@ export default function App() {
                 <Route path="/login"        element={<Login />}         />
                 <Route path="/my-bookings"  element={<MyBookings />}    />
                 <Route path="/results"      element={<SearchResults />} />
-                <Route path="/booking"      element={<ProtectedRoute><Booking /></ProtectedRoute>} />
-                <Route path="*"             element={<NotFound />}      />
+                <Route path="/booking"        element={<ProtectedRoute><Booking /></ProtectedRoute>} />
+                <Route path="/payment"        element={<ProtectedRoute><Payment /></ProtectedRoute>} />
+                <Route path="/payment-result" element={<ProtectedRoute><PaymentResult /></ProtectedRoute>} />
+                <Route path="*"               element={<NotFound />} />
               </Routes>
             </div>
 

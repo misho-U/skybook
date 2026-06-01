@@ -59,6 +59,16 @@ function CancelConfirm({ label, onConfirm, onCancel, cancelling }) {
   )
 }
 
+function PaymentBadge() {
+  // Trips are only persisted after a successful Flitt approval now,
+  // so every row in My Bookings is paid by definition.
+  return (
+    <span className="text-xs bg-emerald-50 text-emerald-600 border border-emerald-200 font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
+      <span className="text-[10px]">✓</span> Paid
+    </span>
+  )
+}
+
 function FlightLeg({ label, booking, accentClass }) {
   const f = booking.flight
   if (!f) return null
@@ -178,9 +188,11 @@ export default function MyBookings() {
           const totalPrice = (outPrice + retPrice) * seatsCount + seatExtra
 
           return {
-            tripId:       trip.id,
-            tripRef:      trip.id.slice(0, 8).toUpperCase(),
-            tripType:     trip.trip_type,
+            tripId:        trip.id,
+            tripRef:       trip.id.slice(0, 8).toUpperCase(),
+            tripType:      trip.trip_type,
+            paymentStatus: trip.payment_status ?? 'pending',
+            paymentAmount: trip.payment_amount ?? totalPrice,
             passengerName:  trip.passenger_name,
             passengerEmail: trip.passenger_email,
             contactEmail:   trip.contact_email,
@@ -209,6 +221,21 @@ export default function MyBookings() {
       await supabase.from('trips').delete().eq('id', trip.tripId)
       if (trip.allSeatIds.length > 0) {
         await supabase.from('seats').update({ is_occupied: false }).in('id', trip.allSeatIds)
+      }
+
+      // Wipe the legacy local-trip ref cache entirely
+      localStorage.removeItem('skybook_trips')
+
+      // Prune this trip's flight IDs from the booked-IDs list so the
+      // "Booked" badge disappears from those flight cards on Home/Results
+      const cancelledFlightIds = [
+        trip.outLeg?.flight?.id,
+        trip.retLeg?.flight?.id,
+      ].filter(Boolean)
+      if (cancelledFlightIds.length > 0) {
+        const existing  = JSON.parse(localStorage.getItem('skybook_flight_ids') || '[]')
+        const remaining = existing.filter(id => !cancelledFlightIds.includes(id))
+        localStorage.setItem('skybook_flight_ids', JSON.stringify(remaining))
       }
 
       setTrips(prev => prev.filter(t => t.tripId !== trip.tripId))
@@ -247,7 +274,7 @@ export default function MyBookings() {
           {trips.map((trip, i) => (
             <div
               key={trip.tripId}
-              className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden animate-fade-in-up animate-stagger"
+              className="bg-white rounded-2xl border border-slate-100 shadow-md hover:shadow-lg transition-shadow duration-200 overflow-hidden animate-fade-in-up animate-stagger"
               style={{ animationDelay: `${i * 60}ms` }}
             >
               {/* Accent bar */}
@@ -284,6 +311,7 @@ export default function MyBookings() {
                       )
                     })()}
                     <span className="text-xs text-slate-400 font-mono">Ref: {trip.tripRef}</span>
+                    <PaymentBadge />
                   </div>
                   <div className="text-right">
                     <p className="text-blue-600 font-extrabold text-xl leading-none">

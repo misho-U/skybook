@@ -47,7 +47,7 @@ export default function Login() {
   }
 
   return (
-    <main className="min-h-[calc(100vh-4rem)] flex items-center justify-center px-4 py-12 bg-slate-50">
+    <main className="min-h-[calc(100vh-4rem)] flex items-center justify-center px-4 py-12 bg-gradient-to-br from-blue-50 via-white to-indigo-50">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <Link to="/" className="inline-flex items-center gap-2 font-extrabold text-2xl text-blue-600">
@@ -56,7 +56,7 @@ export default function Login() {
           <p className="text-slate-500 text-sm mt-2">Sign in to manage your bookings</p>
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-8">
+        <div className="bg-white rounded-3xl border border-slate-100/60 shadow-2xl shadow-slate-200/80 p-8">
           <div className="flex gap-1 p-1 bg-slate-100 rounded-xl mb-6">
             {[['signin', 'Sign In'], ['signup', 'Sign Up']].map(([val, label]) => (
               <button key={val} type="button" onClick={() => switchTab(val)}

@@ -47,8 +47,8 @@ export default function LuggageSelector({ selected, onChange }) {
             onClick={() => onChange(plan.id)}
             className={`relative flex flex-col items-center gap-2 p-3 rounded-2xl border-2 text-center transition-all duration-200 btn-press
               ${active
-                ? 'border-blue-500 bg-blue-50 shadow-sm shadow-blue-100'
-                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'}`}
+                ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-100 shadow-md shadow-blue-200/60'
+                : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50 hover:scale-[1.02]'}`}
           >
             {active && (
               <div className="absolute top-2 right-2 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center shrink-0">
@@ -58,7 +58,7 @@ export default function LuggageSelector({ selected, onChange }) {
               </div>
             )}
 
-            <span className="text-2xl leading-none">
+            <span className="text-3xl leading-none">
               {plan.icon}
               {plan.iconSuffix && (
                 <span className="text-sm font-black text-slate-500 align-super ml-0.5">{plan.iconSuffix}</span>
