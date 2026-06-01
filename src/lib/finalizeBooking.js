@@ -86,7 +86,10 @@ export async function finalizeBooking({ user, onEmailResult } = {}) {
 
   // 4. Clear session — booking is final
   sessionStorage.removeItem('pending_booking')
-  sessionStorage.removeItem('flitt_order_id')
+  // NOTE: flitt_order_id is intentionally NOT cleared here. The caller decides
+  // when to drop it — Payment.jsx keeps it around (alongside a `payment_finalized`
+  // sentinel) so it can detect Flitt's late tail-redirect and bounce the user
+  // straight to /my-bookings without re-mounting the widget.
 
   const ref = String(tripId).slice(0, 8).toUpperCase()
 

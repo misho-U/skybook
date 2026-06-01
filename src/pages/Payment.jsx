@@ -56,6 +56,17 @@ export default function Payment() {
   const [flittOrderId,        setFlittOrderId]        = useState(null)
   const [resumedFromRedirect, setResumedFromRedirect] = useState(false)
 
+  // Detect Flitt's late tail-redirect AFTER a successful finalize.
+  // If the previous Payment mount finalized the booking, it stamped
+  // `payment_finalized` to the same order_id we still have in sessionStorage.
+  // When Flitt's 5–10s tail redirect lands us back here, we recognise the
+  // pattern and bounce to /my-bookings before any UI mounts.
+  const [isPostFinalizeTail] = useState(() => {
+    const oid = sessionStorage.getItem('flitt_order_id')
+    const fin = sessionStorage.getItem('payment_finalized')
+    return Boolean(oid && fin && oid === fin)
+  })
+
   // 'idle' | 'finalizing' | 'success' | 'failed' | 'timeout'
   const [paymentState, setPaymentState] = useState('idle')
   const [bookingRef,   setBookingRef]   = useState(null)
@@ -65,8 +76,21 @@ export default function Payment() {
   const finalized        = useRef(false)
   const flittApiChecked  = useRef(false)   // we only hit Flitt's status API once
 
+  // ── 0. Post-finalize tail-redirect short-circuit ────────────────────────────
+  // Fires before any other effect — bounces straight to /my-bookings if this
+  // mount is just Flitt landing the user back after a payment we already
+  // finalized in a previous mount.
+  useEffect(() => {
+    if (!isPostFinalizeTail) return
+    console.log('[Payment] Post-finalize tail redirect detected — bouncing to /my-bookings')
+    sessionStorage.removeItem('flitt_order_id')
+    sessionStorage.removeItem('payment_finalized')
+    navigate('/my-bookings', { replace: true })
+  }, [isPostFinalizeTail, navigate])
+
   // ── 1. Hydrate pending booking from sessionStorage ──────────────────────────
   useEffect(() => {
+    if (isPostFinalizeTail) return   // handled above
     try {
       const raw = sessionStorage.getItem('pending_booking')
       if (!raw) { navigate('/', { replace: true }); return }
@@ -92,7 +116,7 @@ export default function Payment() {
     } catch {
       navigate('/', { replace: true })
     }
-  }, [navigate])
+  }, [navigate, isPostFinalizeTail])
 
   // ── 2. Load SDK, fetch token, mount the widget ──────────────────────────────
   useEffect(() => {
@@ -321,6 +345,15 @@ export default function Payment() {
 
     setBookingRef(result.ref)
     setPaymentState('success')
+
+    // Stamp a sentinel so a late Flitt tail-redirect (which can arrive 5–10s
+    // after the user is already on /my-bookings) doesn't drop the user back
+    // onto a half-rendered Payment page. The next Payment mount will see
+    // payment_finalized === flitt_order_id and bounce immediately.
+    if (flittOrderId) {
+      sessionStorage.setItem('payment_finalized', flittOrderId)
+    }
+
     setTimeout(() => navigate('/my-bookings'), 2000)
   }
 
@@ -335,6 +368,17 @@ export default function Payment() {
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
+
+  // Post-finalize tail-redirect from Flitt — the bounce effect is already
+  // queued; show a thin spinner for the millisecond before navigate() fires.
+  if (isPostFinalizeTail) {
+    return (
+      <main className="max-w-xl mx-auto px-4 py-32 flex flex-col items-center gap-4 animate-fade-in">
+        <div className="w-12 h-12 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin" />
+        <p className="text-slate-400 text-sm">Returning to your bookings…</p>
+      </main>
+    )
+  }
 
   if (!pending && !initError) {
     return (

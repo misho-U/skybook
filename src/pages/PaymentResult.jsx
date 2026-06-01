@@ -90,6 +90,10 @@ export default function PaymentResult() {
         }
 
         setBookingRef(result.ref)
+        // finalizeBooking no longer clears flitt_order_id on its own — wipe it
+        // here so a future booking attempt doesn't reuse a stale session order.
+        sessionStorage.removeItem('flitt_order_id')
+        sessionStorage.removeItem('payment_finalized')
         setState('success')
         setTimeout(() => navigate('/my-bookings'), 2000)
         return
