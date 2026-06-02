@@ -237,13 +237,36 @@ export default function Home() {
   return (
     <main>
       {/* ── Hero ── */}
-      <section className="relative bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 text-white overflow-hidden">
-        <div className="absolute inset-0 pointer-events-none"
+      {/* Gradient is a fallback while the video downloads / if it fails to load */}
+      <section className="relative min-h-screen flex items-center text-white overflow-hidden bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800">
+
+        {/* Fullscreen looping background video (Pexels — free / CC0) */}
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="auto"
+          poster="https://images.unsplash.com/photo-1436491865332-7a61a109cc05?w=1600&q=80"
+          className="absolute inset-0 w-full h-full object-cover"
+          aria-hidden="true"
+        >
+          <source
+            src="https://videos.pexels.com/video-files/854671/854671-hd_1920_1080_30fps.mp4"
+            type="video/mp4"
+          />
+        </video>
+
+        {/* Dark overlay so white text stays readable on top of footage */}
+        <div className="absolute inset-0 bg-black/40 pointer-events-none" />
+
+        {/* Existing decorative texture — kept subtle, layered above the overlay */}
+        <div className="absolute inset-0 pointer-events-none opacity-60"
           style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
         <div className="absolute -top-24 -right-24 w-96 h-96 bg-white/5 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute bottom-0 left-0 w-72 h-72 bg-indigo-900/30 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-28 text-center">
+        <div className="relative w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-28 text-center">
           <p className="inline-flex items-center gap-2 text-blue-200 font-semibold text-sm tracking-widest uppercase mb-5 bg-white/10 px-4 py-1.5 rounded-full">
             <span>✈️</span> Your journey starts here
           </p>
