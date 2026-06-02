@@ -13,69 +13,40 @@ const CARD_ACCENT = {
   infant: 'border-l-orange-400 bg-orange-50/40',
 }
 
-const MONTH_NAMES = [
-  'January','February','March','April','May','June',
-  'July','August','September','October','November','December',
-]
+/** Return YYYY-MM-DD for the date `years` years before today. */
+function isoDateYearsAgo(years) {
+  const d = new Date()
+  d.setFullYear(d.getFullYear() - years)
+  return d.toISOString().split('T')[0]
+}
 
-function DobSelect({ value, passengerType, onChange, error }) {
-  const thisYear  = new Date().getFullYear()
-  // Initialise from a pre-existing value (e.g. navigating back through steps)
-  const initParts = value?.split('-') ?? []
+const TODAY_ISO = new Date().toISOString().split('T')[0]
 
-  // Own state so each dropdown retains its value independently of the others.
-  // Deriving from props caused the bug: build() returned '' when any field was
-  // missing, wiping already-selected values on the next render.
-  const [selY, setSelY] = useState(initParts[0] || '')
-  const [selM, setSelM] = useState(initParts[1] ? Number(initParts[1]) : '')
-  const [selD, setSelD] = useState(initParts[2] ? Number(initParts[2]) : '')
-
-  const yearMin = passengerType === 'infant' ? thisYear - 2 : 1930
-  const years   = Array.from({ length: thisYear - yearMin + 1 }, (_, i) => thisYear - i)
-
-  function emit(y, m, d) {
-    onChange(
-      y && m && d
-        ? `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-        : ''
-    )
+/** Min/max attributes for the native date input, by passenger type. */
+function dobBounds(type) {
+  if (type === 'infant') {
+    return { min: isoDateYearsAgo(2), max: TODAY_ISO }
   }
+  // adults + children: anywhere from 1930 to today
+  return { min: '1930-01-01', max: TODAY_ISO }
+}
 
-  const cls = [
-    'py-3 rounded-xl border text-sm text-slate-800 bg-white',
-    'focus:outline-none focus:ring-2 transition-all duration-200',
-    error
-      ? 'border-red-400 focus:ring-red-300 bg-red-50/60'
-      : 'border-slate-200 focus:ring-blue-500 focus:border-transparent',
-  ].join(' ')
-
+function DobInput({ value, passengerType, onChange, error, id }) {
+  const { min, max } = dobBounds(passengerType)
   return (
-    <div className="flex gap-2">
-      <select value={selD}
-        onChange={e => { setSelD(e.target.value); emit(selY, selM, e.target.value) }}
-        className={`${cls} w-20 px-2`}>
-        <option value="">Day</option>
-        {Array.from({ length: 31 }, (_, i) => i + 1).map(d => (
-          <option key={d} value={d}>{d}</option>
-        ))}
-      </select>
-      <select value={selM}
-        onChange={e => { setSelM(e.target.value); emit(selY, e.target.value, selD) }}
-        className={`${cls} flex-1 px-2`}>
-        <option value="">Month</option>
-        {MONTH_NAMES.map((name, i) => (
-          <option key={i} value={i + 1}>{name}</option>
-        ))}
-      </select>
-      <select value={selY}
-        onChange={e => { setSelY(e.target.value); emit(e.target.value, selM, selD) }}
-        className={`${cls} w-24 px-2`}>
-        <option value="">Year</option>
-        {years.map(y => (
-          <option key={y} value={y}>{y}</option>
-        ))}
-      </select>
-    </div>
+    <input
+      id={id}
+      type="date"
+      value={value || ''}
+      min={min}
+      max={max}
+      onChange={e => onChange(e.target.value)}
+      className={`w-full px-4 py-3 rounded-xl border text-sm text-slate-800 transition-all duration-200 focus:outline-none focus:ring-2 ${
+        error
+          ? 'border-red-400 focus:ring-red-300 bg-red-50/60'
+          : 'border-slate-200 focus:ring-blue-500 focus:border-transparent bg-white'
+      }`}
+    />
   )
 }
 
@@ -123,7 +94,7 @@ export default function StepPassengerInfo({
     passengers.forEach((p, i) => {
       if (!p.firstName.trim()) errs[`${i}.firstName`] = 'Required'
       if (!p.lastName.trim())  errs[`${i}.lastName`]  = 'Required'
-      if (!isValidDob(p.dob))  errs[`${i}.dob`]       = 'Please select a complete date of birth'
+      if (!isValidDob(p.dob))  errs[`${i}.dob`]       = 'Please select a date of birth'
       if (p.type !== 'infant' && !p.passport.trim()) errs[`${i}.passport`] = 'Required'
     })
     if (!contact.email.trim())
@@ -164,8 +135,11 @@ export default function StepPassengerInfo({
                 onChange={e => handlePassengerField(i, 'lastName', e.target.value)}
                 error={errors[`${i}.lastName`]} placeholder="Smith" />
               <div className="sm:col-span-2">
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5">Date of birth</label>
-                <DobSelect
+                <label htmlFor={`p${i}-dob`} className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  Date of birth
+                </label>
+                <DobInput
+                  id={`p${i}-dob`}
                   value={p.dob}
                   passengerType={p.type}
                   onChange={v => handlePassengerField(i, 'dob', v)}

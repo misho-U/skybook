@@ -84,6 +84,26 @@ export async function finalizeBooking({ user, onEmailResult } = {}) {
   if (pending.returnFlightId) ids.push(pending.returnFlightId)
   localStorage.setItem('skybook_flight_ids', JSON.stringify(ids))
 
+  // 3b. Save first adult's details to the user's profile so future bookings
+  //     auto-fill Adult 1. Non-blocking — the booking itself already succeeded.
+  if (user?.id && Array.isArray(pending.passengers)) {
+    const leadAdult = pending.passengers.find(p => p.type === 'adult')
+    if (leadAdult?.firstName && leadAdult?.lastName) {
+      supabase
+        .from('profiles')
+        .upsert({
+          user_id:    user.id,
+          first_name: leadAdult.firstName,
+          last_name:  leadAdult.lastName,
+          dob:        leadAdult.dob       || null,
+          passport:   leadAdult.passport  || null,
+        }, { onConflict: 'user_id' })
+        .then(({ error: profileErr }) => {
+          if (profileErr) console.warn('[finalize] profile upsert failed:', profileErr)
+        })
+    }
+  }
+
   // 4. Clear session — booking is final
   sessionStorage.removeItem('pending_booking')
   // NOTE: flitt_order_id is intentionally NOT cleared here. The caller decides

@@ -102,6 +102,36 @@ export default function Booking() {
     if (user?.email) setContact(prev => ({ ...prev, email: prev.email || user.email }))
   }, [user?.email])
 
+  // Pre-fill Adult 1 from the user's saved profile (if any).
+  // Only overwrites fields that are still blank — never clobbers user typing.
+  useEffect(() => {
+    if (!user?.id) return
+    let cancelled = false
+
+    supabase
+      .from('profiles')
+      .select('first_name, last_name, dob, passport')
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled || !data) return
+        if (error) { console.warn('[Booking] profile fetch error:', error); return }
+
+        setPassengers(prev => prev.map((p, idx) => {
+          if (idx !== 0 || p.type !== 'adult') return p
+          return {
+            ...p,
+            firstName: p.firstName || data.first_name || '',
+            lastName:  p.lastName  || data.last_name  || '',
+            dob:       p.dob       || data.dob        || '',
+            passport:  p.passport  || data.passport   || '',
+          }
+        }))
+      })
+
+    return () => { cancelled = true }
+  }, [user?.id])
+
   usePageTitle(outboundFlight ? `Book · ${outboundFlight.destination?.city}${isRoundTrip ? ' ↔' : ''}` : 'Book Flight')
 
   useEffect(() => {
