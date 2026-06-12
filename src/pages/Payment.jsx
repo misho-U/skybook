@@ -73,16 +73,35 @@ export default function Payment() {
     return Boolean(oid && fin && oid === fin && !pending)
   })
 
-  // Detect a payment that was already approved by Flitt but whose finalize
-  // hadn't completed when the page was closed/refreshed/crashed (e.g. Supabase
-  // was briefly down). On reload, we skip the Flitt widget entirely and retry
-  // the finalize step against the existing order.
+  // Detect that we should skip the Flitt widget and finalize immediately on
+  // mount. Two trigger conditions:
+  //
+  //   A. Retry path — a previous mount stamped `payment_approved_pending_finalize`
+  //      but its finalize crashed (Supabase down, network out, browser closed).
+  //
+  //   B. Fresh redirect path — the flitt-redirect bridge bounced the user back
+  //      with `?order_status=approved` in the URL. In sandbox mode this is the
+  //      authoritative signal — payment_intents may never flip, and the Flitt
+  //      status API can return 'created' for many seconds during 3DS post-processing.
+  //      Trusting the URL here saves a 30-second wait per redirect.
+  //
+  // Both paths converge on the same handler: handleApproved() runs at mount,
+  // skipping widget mount, polling, and the Flitt API check entirely.
   const [needsFinalizeRetry] = useState(() => {
-    if (isPostFinalizeTail) return false   // already covered by the other path
+    if (isPostFinalizeTail) return false                              // already done
     const oid = sessionStorage.getItem('flitt_order_id')
-    const approved = sessionStorage.getItem('payment_approved_pending_finalize')
-    const finalized = sessionStorage.getItem('payment_finalized')
-    return Boolean(oid && approved && oid === approved && !finalized)
+    if (!oid) return false
+    if (sessionStorage.getItem('payment_finalized')) return false     // success already stamped
+
+    // Trigger A: previous mount approved-but-not-finalized
+    const approvedSentinel = sessionStorage.getItem('payment_approved_pending_finalize')
+    if (approvedSentinel === oid) return true
+
+    // Trigger B: URL says approved on a fresh redirect from the bridge
+    const urlStatus = new URLSearchParams(window.location.search).get('order_status')
+    if (urlStatus === 'approved') return true
+
+    return false
   })
 
   // 'idle' | 'finalizing' | 'finalize-error' | 'success' | 'failed' | 'timeout'
@@ -113,16 +132,25 @@ export default function Payment() {
     navigate('/my-bookings', { replace: true })
   }, [isPostFinalizeTail, navigate])
 
-  // ── 0b. Auto-retry an unfinished finalize on mount ──────────────────────────
-  // Triggered when the user reloads / re-opens the page after their payment
-  // was approved but finalize crashed (Supabase down, network out, etc.).
+  // ── 0b. Auto-finalize on mount (retry path or URL-approved redirect) ────────
+  // See needsFinalizeRetry initializer for the trigger conditions.
   // Waits for auth to resolve, then runs handleApproved exactly once.
   useEffect(() => {
     if (!needsFinalizeRetry) return
     if (!user?.id) return
     if (retryEffectRan.current) return
     retryEffectRan.current = true
-    console.log('[Payment] Resuming unfinished finalize for order', sessionStorage.getItem('flitt_order_id'))
+
+    const oid       = sessionStorage.getItem('flitt_order_id')
+    const sentinel  = sessionStorage.getItem('payment_approved_pending_finalize')
+    const urlStatus = new URLSearchParams(window.location.search).get('order_status')
+    const trigger   = sentinel === oid
+      ? 'sentinel (retrying previous failed finalize)'
+      : urlStatus === 'approved'
+        ? 'URL order_status=approved (fresh redirect)'
+        : 'unknown'
+    console.log('[Payment] Auto-finalize triggered by:', trigger, '· order:', oid)
+
     handleApproved()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [needsFinalizeRetry, user?.id])
