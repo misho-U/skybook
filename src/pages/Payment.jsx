@@ -73,14 +73,30 @@ export default function Payment() {
     return Boolean(oid && fin && oid === fin && !pending)
   })
 
-  // 'idle' | 'finalizing' | 'success' | 'failed' | 'timeout'
-  const [paymentState, setPaymentState] = useState('idle')
+  // Detect a payment that was already approved by Flitt but whose finalize
+  // hadn't completed when the page was closed/refreshed/crashed (e.g. Supabase
+  // was briefly down). On reload, we skip the Flitt widget entirely and retry
+  // the finalize step against the existing order.
+  const [needsFinalizeRetry] = useState(() => {
+    if (isPostFinalizeTail) return false   // already covered by the other path
+    const oid = sessionStorage.getItem('flitt_order_id')
+    const approved = sessionStorage.getItem('payment_approved_pending_finalize')
+    const finalized = sessionStorage.getItem('payment_finalized')
+    return Boolean(oid && approved && oid === approved && !finalized)
+  })
+
+  // 'idle' | 'finalizing' | 'finalize-error' | 'success' | 'failed' | 'timeout'
+  // Start in 'finalizing' if we're picking up an unfinished finalize so the
+  // widget UI never flashes for retry users.
+  const [paymentState, setPaymentState] = useState(needsFinalizeRetry ? 'finalizing' : 'idle')
   const [bookingRef,   setBookingRef]   = useState(null)
   const [errorMsg,     setErrorMsg]     = useState(null)
+  const [isRetrying,   setIsRetrying]   = useState(false)
 
   const initialized      = useRef(false)
   const finalized        = useRef(false)
   const flittApiChecked  = useRef(false)   // we only hit Flitt's status API once
+  const retryEffectRan   = useRef(false)   // ensure the auto-retry runs only once
 
   // ── 0. Post-finalize tail-redirect short-circuit ────────────────────────────
   // Fires before any other effect — bounces straight to /my-bookings if this
@@ -94,9 +110,38 @@ export default function Payment() {
     navigate('/my-bookings', { replace: true })
   }, [isPostFinalizeTail, navigate])
 
+  // ── 0b. Auto-retry an unfinished finalize on mount ──────────────────────────
+  // Triggered when the user reloads / re-opens the page after their payment
+  // was approved but finalize crashed (Supabase down, network out, etc.).
+  // Waits for auth to resolve, then runs handleApproved exactly once.
+  useEffect(() => {
+    if (!needsFinalizeRetry) return
+    if (!user?.id) return
+    if (retryEffectRan.current) return
+    retryEffectRan.current = true
+    console.log('[Payment] Resuming unfinished finalize for order', sessionStorage.getItem('flitt_order_id'))
+    handleApproved()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsFinalizeRetry, user?.id])
+
   // ── 1. Hydrate pending booking from sessionStorage ──────────────────────────
   useEffect(() => {
     if (isPostFinalizeTail) return   // handled above
+
+    // Retry path: don't run normal hydration. Just lift flitt_order_id into
+    // state so handleApproved() can stamp the right sentinels. We DO try to
+    // load pending_booking (finalizeBooking needs it) but don't bounce home
+    // if it's missing — the retry UI handles that case with a clear message.
+    if (needsFinalizeRetry) {
+      const oid = sessionStorage.getItem('flitt_order_id')
+      if (oid) setFlittOrderId(oid)
+      const raw = sessionStorage.getItem('pending_booking')
+      if (raw) {
+        try { setPending(JSON.parse(raw)) } catch { /* handled in retry */ }
+      }
+      return
+    }
+
     try {
       const raw = sessionStorage.getItem('pending_booking')
       if (!raw) { navigate('/', { replace: true }); return }
@@ -122,11 +167,12 @@ export default function Payment() {
     } catch {
       navigate('/', { replace: true })
     }
-  }, [navigate, isPostFinalizeTail])
+  }, [navigate, isPostFinalizeTail, needsFinalizeRetry])
 
   // ── 2. Load SDK, fetch token, mount the widget ──────────────────────────────
   useEffect(() => {
     if (!pending || initError || initialized.current) return
+    if (needsFinalizeRetry) return   // retry path doesn't need a fresh widget
 
     let cancelled = false
     injectCss(FLITT_CSS_URL)
@@ -330,34 +376,72 @@ export default function Payment() {
   async function handleApproved() {
     if (finalized.current) return
     finalized.current = true
-
+    setIsRetrying(true)
+    setErrorMsg(null)
     setPaymentState('finalizing')
 
-    const result = await finalizeBooking({
-      user,
-      onEmailResult: (emailErr) => {
-        addToast(
-          emailErr ? 'Booking confirmed (email delivery failed)' : 'Confirmation email sent! ✉️',
-          emailErr ? 'info' : 'success',
-        )
-      },
-    })
+    // Stamp the "approved but not finalized" sentinel BEFORE attempting the
+    // save, so a crash/refresh between here and the success branch lets us
+    // recover on the next mount. Cleared only after finalize succeeds.
+    const orderId = flittOrderId || sessionStorage.getItem('flitt_order_id')
+    if (orderId) {
+      sessionStorage.setItem('payment_approved_pending_finalize', orderId)
+    }
 
-    if (!result.ok) {
-      setErrorMsg(result.message)
-      setPaymentState('failed')
+    let result
+    try {
+      result = await finalizeBooking({
+        user,
+        onEmailResult: (emailErr) => {
+          addToast(
+            emailErr ? 'Booking confirmed (email delivery failed)' : 'Confirmation email sent! ✉️',
+            emailErr ? 'info' : 'success',
+          )
+        },
+      })
+    } catch (err) {
+      console.error('[Payment] finalizeBooking threw:', err)
+      finalized.current = false   // allow user-initiated retry
+      setIsRetrying(false)
+      setErrorMsg(
+        err?.message
+          ? `Could not save your booking: ${err.message}`
+          : 'Could not save your booking. Your payment was received — please retry.'
+      )
+      setPaymentState('finalize-error')
       return
     }
 
+    if (!result.ok) {
+      finalized.current = false   // allow user-initiated retry
+      setIsRetrying(false)
+
+      // NO_PENDING means pending_booking is gone from sessionStorage. Recovery
+      // from this state needs human help — show a clear support message.
+      if (result.code === 'NO_PENDING') {
+        setErrorMsg(
+          `Your payment was received but we lost the booking details for this session. ` +
+          `Please contact support with order ID ${orderId?.slice(0, 8).toUpperCase() ?? '(unknown)'}.`
+        )
+      } else {
+        setErrorMsg(result.message ?? 'Could not save your booking. Please retry.')
+      }
+      setPaymentState('finalize-error')
+      return
+    }
+
+    // ── Success ──────────────────────────────────────────────────────────
+    sessionStorage.removeItem('payment_approved_pending_finalize')
+
     setBookingRef(result.ref)
     setPaymentState('success')
+    setIsRetrying(false)
 
-    // Stamp a sentinel so a late Flitt tail-redirect (which can arrive 5–10s
-    // after the user is already on /my-bookings) doesn't drop the user back
-    // onto a half-rendered Payment page. The next Payment mount will see
-    // payment_finalized === flitt_order_id and bounce immediately.
-    if (flittOrderId) {
-      sessionStorage.setItem('payment_finalized', flittOrderId)
+    // Stamp a sentinel so a late Flitt tail-redirect (5–10s after the user
+    // has already been navigated to /my-bookings) doesn't drop them back
+    // onto a half-rendered Payment page.
+    if (orderId) {
+      sessionStorage.setItem('payment_finalized', orderId)
     }
 
     setTimeout(() => navigate('/my-bookings'), 2000)
@@ -373,6 +457,12 @@ export default function Payment() {
     window.location.reload()
   }
 
+  /** User-initiated retry of the finalize step (payment already approved). */
+  function retryFinalize() {
+    if (isRetrying) return
+    handleApproved()
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   // Post-finalize tail-redirect from Flitt — the bounce effect is already
@@ -386,7 +476,9 @@ export default function Payment() {
     )
   }
 
-  if (!pending && !initError) {
+  // Don't show "Preparing your payment…" if we're recovering from an
+  // unfinished finalize — the retry UI handles its own loading state.
+  if (!pending && !initError && !needsFinalizeRetry) {
     return (
       <main className="max-w-xl mx-auto px-4 py-32 flex flex-col items-center gap-4 animate-fade-in">
         <div className="w-12 h-12 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin" />
@@ -407,6 +499,57 @@ export default function Payment() {
         >
           ← Back to Home
         </Link>
+      </main>
+    )
+  }
+
+  // ── Retry path: minimal layout, no trip summary (pending may be null) ──
+  if (needsFinalizeRetry) {
+    const shortRef = (sessionStorage.getItem('flitt_order_id') ?? flittOrderId ?? '')
+      .slice(0, 8).toUpperCase()
+    return (
+      <main className="max-w-xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+        <div className="mb-6 flex items-center gap-3">
+          <div className="w-11 h-11 bg-blue-100 rounded-2xl flex items-center justify-center text-xl shrink-0">
+            ✈️
+          </div>
+          <div>
+            <h1 className="text-2xl font-extrabold text-slate-800 leading-tight">Finishing your booking</h1>
+            <p className="text-sm text-slate-500">
+              Order <span className="font-mono font-bold text-slate-700">{shortRef}</span>
+            </p>
+          </div>
+        </div>
+
+        {paymentState === 'finalizing' && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center py-16 gap-3 min-h-[200px] animate-fade-in">
+            <div className="w-12 h-12 border-4 border-emerald-100 border-t-emerald-500 rounded-full animate-spin" />
+            <p className="text-slate-700 text-sm font-semibold">Saving your booking…</p>
+            <p className="text-slate-400 text-xs">Your payment was already received.</p>
+          </div>
+        )}
+
+        {paymentState === 'success' && (
+          <div className="bg-white rounded-2xl border-2 border-emerald-200 shadow-md p-8 text-center animate-fade-in">
+            <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-5">
+              <span className="text-4xl">✅</span>
+            </div>
+            <h2 className="text-2xl font-extrabold text-slate-800 mb-1">Booking Saved!</h2>
+            <p className="text-slate-500 text-sm mb-1">
+              Booking reference: <span className="font-mono font-bold text-slate-700">{bookingRef}</span>
+            </p>
+            <p className="text-slate-400 text-xs">Redirecting to My Bookings…</p>
+          </div>
+        )}
+
+        {paymentState === 'finalize-error' && (
+          <FinalizeErrorCard
+            errorMsg={errorMsg}
+            shortRef={shortRef}
+            onRetry={retryFinalize}
+            isRetrying={isRetrying}
+          />
+        )}
       </main>
     )
   }
@@ -474,6 +617,16 @@ export default function Payment() {
           <p className="text-slate-400 text-xs mb-5">A confirmation email is on its way.</p>
           <p className="text-slate-400 text-xs">Redirecting to My Bookings…</p>
         </div>
+      )}
+
+      {/* Finalize error — payment was received, save to DB failed */}
+      {paymentState === 'finalize-error' && (
+        <FinalizeErrorCard
+          errorMsg={errorMsg}
+          shortRef={(flittOrderId ?? '').slice(0, 8).toUpperCase()}
+          onRetry={retryFinalize}
+          isRetrying={isRetrying}
+        />
       )}
 
       {/* Failed / timeout */}
@@ -553,6 +706,42 @@ export default function Payment() {
         </>
       )}
     </main>
+  )
+}
+
+// ── FinalizeErrorCard ─────────────────────────────────────────────────────────
+// Shown when payment WAS approved but saving the booking to Supabase failed.
+// Distinct from the "Payment Failed" card because the user must NOT be sent
+// through Flitt again — they'd be charged twice. They retry only the save.
+
+function FinalizeErrorCard({ errorMsg, shortRef, onRetry, isRetrying }) {
+  return (
+    <div className="bg-white rounded-2xl border-2 border-amber-200 shadow-md p-6 text-center animate-fade-in">
+      <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+        <span className="text-3xl">⚠️</span>
+      </div>
+      <h2 className="text-xl font-extrabold text-slate-800 mb-1">Couldn't save your booking</h2>
+      <p className="text-emerald-600 text-xs font-semibold mb-3">
+        ✓ Your payment was received successfully
+      </p>
+      <p className="text-slate-500 text-sm mb-5 max-w-sm mx-auto">{errorMsg}</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        disabled={isRetrying}
+        className="px-6 py-2.5 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 shadow-sm shadow-blue-200 btn-press transition-all disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
+      >
+        {isRetrying && (
+          <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+        )}
+        {isRetrying ? 'Retrying…' : 'Retry'}
+      </button>
+      {shortRef && (
+        <p className="mt-4 text-xs text-slate-400">
+          Order ID: <span className="font-mono text-slate-500">{shortRef}</span>
+        </p>
+      )}
+    </div>
   )
 }
 
