@@ -343,7 +343,9 @@ export default function Payment() {
     //       in-flight webhook arrive first.
     const urlStatus = new URLSearchParams(window.location.search).get('order_status')
     const URL_APPROVAL_AFTER     = 3       // polls (~1.5 s) before trusting URL
-    const FLITT_API_CHECK_AFTER  = 3000    // ms after widget closes before hitting API
+    const FLITT_API_CHECK_AFTER  = 30000   // ms after widget closes before hitting API
+                                             // (long enough for the user to finish 3DS
+                                             //  and for Flitt to process the payment)
 
     const pollOnce = async () => {
       if (cancelled) return
@@ -414,6 +416,9 @@ export default function Payment() {
 
           if (apiErr) {
             console.warn('[Payment] check-flitt-status invocation error:', apiErr)
+            // Allow another attempt in another 30 s
+            flittApiChecked.current      = false
+            widgetTransitionedAt.current = Date.now()
           } else {
             console.log('[Payment] Flitt API result:', apiData)
             const apiStatus = apiData?.order_status
@@ -427,10 +432,18 @@ export default function Payment() {
               handleDeclined()
               return
             }
-            // anything else (processing, created, …) → keep polling payment_intents
+            // Non-terminal status (created, processing, …) — user is still
+            // moving through the payment. Re-arm the gate so we ask again
+            // in another FLITT_API_CHECK_AFTER ms.
+            console.log('[Payment] Flitt API non-terminal status:', apiStatus, '— will retry in', FLITT_API_CHECK_AFTER, 'ms')
+            flittApiChecked.current      = false
+            widgetTransitionedAt.current = Date.now()
           }
         } catch (err) {
           console.warn('[Payment] check-flitt-status threw:', err)
+          // Same recovery: allow another attempt next cycle
+          flittApiChecked.current      = false
+          widgetTransitionedAt.current = Date.now()
         }
       }
 
