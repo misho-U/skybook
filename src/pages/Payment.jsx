@@ -93,10 +93,13 @@ export default function Payment() {
   const [errorMsg,     setErrorMsg]     = useState(null)
   const [isRetrying,   setIsRetrying]   = useState(false)
 
-  const initialized      = useRef(false)
-  const finalized        = useRef(false)
-  const flittApiChecked  = useRef(false)   // we only hit Flitt's status API once
-  const retryEffectRan   = useRef(false)   // ensure the auto-retry runs only once
+  const initialized          = useRef(false)
+  const finalized            = useRef(false)
+  const flittApiChecked      = useRef(false)   // we only hit Flitt's status API once
+  const retryEffectRan       = useRef(false)   // ensure the auto-retry runs only once
+  const widgetTransitionedAt = useRef(null)    // ms timestamp when the Flitt widget finished
+                                                // (iframe removed/hidden, or N/A in resume case).
+                                                // Gates the Flitt status API check — see effect #4.
 
   // ── 0. Post-finalize tail-redirect short-circuit ────────────────────────────
   // Fires before any other effect — bounces straight to /my-bookings if this
@@ -256,6 +259,73 @@ export default function Payment() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending, initError, user])
 
+  // ── 2b. Watch the Flitt widget container for "user is done" ─────────────────
+  // Flitt's iframe stays mounted while the user is filling in card details,
+  // doing 3DS, and waiting for processing. We do NOT want to hit Flitt's
+  // status API during that time — it would return order_status='created' and
+  // burn our one shot at querying it.
+  //
+  // We watch #flitt-checkout with a MutationObserver. When the iframe is
+  // removed, sized to 0, or hidden — that's our signal that the Flitt UI
+  // has finished its work. We stamp widgetTransitionedAt; the polling effect
+  // then waits the FLITT_API_CHECK_AFTER grace period before querying.
+  //
+  // Resume path (no widget) → stamp immediately so the API check is gated
+  // only by the grace period from mount.
+  useEffect(() => {
+    if (resumedFromRedirect) {
+      if (widgetTransitionedAt.current === null) {
+        widgetTransitionedAt.current = Date.now()
+        console.log('[Payment] Resume path — widget gate marked open at mount')
+      }
+      return
+    }
+    if (!checkoutReady) return
+
+    const container = document.getElementById('flitt-checkout')
+    if (!container) return
+
+    function markClosed(reason) {
+      if (widgetTransitionedAt.current !== null) return
+      widgetTransitionedAt.current = Date.now()
+      console.log('[Payment] Widget gate opened —', reason)
+    }
+
+    function checkVisibility() {
+      if (widgetTransitionedAt.current !== null) return
+      const iframe = container.querySelector('iframe')
+      if (!iframe) { markClosed('iframe removed from DOM'); return }
+      const rect = iframe.getBoundingClientRect()
+      if (rect.width === 0 || rect.height === 0) {
+        markClosed(`iframe sized to ${Math.round(rect.width)}×${Math.round(rect.height)}`)
+        return
+      }
+      const style = window.getComputedStyle(iframe)
+      if (style.display === 'none' || style.visibility === 'hidden') {
+        markClosed(`iframe ${style.display === 'none' ? 'display:none' : 'visibility:hidden'}`)
+        return
+      }
+    }
+
+    const observer = new MutationObserver(checkVisibility)
+    observer.observe(container, {
+      childList:        true,
+      subtree:          true,
+      attributes:       true,
+      attributeFilter:  ['style', 'class', 'hidden'],
+    })
+
+    // Also re-check periodically — some Flitt SDK versions resize via
+    // inline styles that MutationObserver picks up, but ResizeObserver-style
+    // changes from internal scripts can slip through.
+    const interval = setInterval(checkVisibility, 1000)
+
+    return () => {
+      observer.disconnect()
+      clearInterval(interval)
+    }
+  }, [checkoutReady, resumedFromRedirect])
+
   // ── 3. Poll payment_intents for status ──────────────────────────────────────
   useEffect(() => {
     if (!flittOrderId) return
@@ -268,16 +338,16 @@ export default function Payment() {
     // Two independent escape hatches for sandbox mode where server_callback
     // never fires:
     //   (a) URL params from the Flitt redirect (if present)
-    //   (b) Direct query to Flitt's order-status API after 10 s of silence
+    //   (b) Direct query to Flitt's order-status API — but only AFTER the
+    //       Flitt widget has closed, with a small grace period to let any
+    //       in-flight webhook arrive first.
     const urlStatus = new URLSearchParams(window.location.search).get('order_status')
     const URL_APPROVAL_AFTER     = 3       // polls (~1.5 s) before trusting URL
-    const FLITT_API_CHECK_AFTER  = 3000    // ms before hitting Flitt's status API
-    const startedAt              = Date.now()
+    const FLITT_API_CHECK_AFTER  = 3000    // ms after widget closes before hitting API
 
     const pollOnce = async () => {
       if (cancelled) return
       attempts++
-      const elapsed = Date.now() - startedAt
 
       // ── 1. Standard payment_intents poll ─────────────────────────────────
       const { data, error } = await supabase
@@ -311,14 +381,28 @@ export default function Payment() {
       }
 
       // ── 3. Flitt API direct check ────────────────────────────────────────
-      // Fires once, when:
-      //   - we've been polling > 10 s
+      // Fires once, when ALL of these hold:
       //   - the URL has NO order_status (otherwise the URL fallback handles it)
-      //   - the DB row is still 'pending'
       //   - we have a flitt_order_id to query
-      if (!urlStatus && flittOrderId && !flittApiChecked.current && elapsed >= FLITT_API_CHECK_AFTER) {
+      //   - we haven't checked already
+      //   - the Flitt widget has closed (iframe removed/hidden) — otherwise
+      //     the user is mid-3DS and the API would return order_status='created'
+      //   - it's been ≥ FLITT_API_CHECK_AFTER ms since widget closed
+      const transitionedAt = widgetTransitionedAt.current
+      const sinceWidgetClosed = transitionedAt ? Date.now() - transitionedAt : 0
+
+      if (
+        !urlStatus
+        && flittOrderId
+        && !flittApiChecked.current
+        && transitionedAt !== null
+        && sinceWidgetClosed >= FLITT_API_CHECK_AFTER
+      ) {
         flittApiChecked.current = true
-        console.log('[Payment] No status after', elapsed, 'ms — querying Flitt API directly for order', flittOrderId)
+        console.log(
+          '[Payment] Widget closed', sinceWidgetClosed, 'ms ago — querying Flitt API for order',
+          flittOrderId,
+        )
 
         try {
           const { data: apiData, error: apiErr } = await supabase.functions.invoke(
