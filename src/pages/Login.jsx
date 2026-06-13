@@ -25,7 +25,14 @@ export default function Login() {
   const [magicLoading, setMagicLoading] = useState(false)
   const [magicError,   setMagicError]   = useState('')
 
-  function switchTab(next) { setTab(next); setError('') }
+  function switchTab(next) {
+    setTab(next)
+    setError('')
+    // Reset magic-link state — it's only meaningful on the Sign In tab and
+    // would otherwise linger as a stale "Check your email" card under Sign Up.
+    setMagicSent(false)
+    setMagicError('')
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -57,6 +64,10 @@ export default function Login() {
    * The user clicks the link in their inbox → Supabase verifies → redirects
    * to `emailRedirectTo` → AuthContext's `onAuthStateChange` listener picks
    * up the new session automatically, no extra page or callback needed.
+   *
+   * `shouldCreateUser: false` means Supabase will reject the request with an
+   * error if no account exists for the email. Magic link is a sign-IN flow
+   * only — new users must use the Sign Up tab first.
    */
   async function handleMagicLink(e) {
     e.preventDefault()
@@ -71,6 +82,9 @@ export default function Login() {
     const { error: otpError } = await supabase.auth.signInWithOtp({
       email,
       options: {
+        // Reject if the email isn't already registered. Prevents the magic
+        // link from doubling as a hidden sign-up channel.
+        shouldCreateUser: false,
         // After the user clicks the email link, Supabase bounces them here.
         // Use the live origin so localhost dev works without env config.
         // (Both this URL and the production URL must be on the allow-list in
@@ -80,7 +94,25 @@ export default function Login() {
     })
     setMagicLoading(false)
 
-    if (otpError) { setMagicError(otpError.message); return }
+    if (otpError) {
+      // Supabase signals "no account exists" through a few different message
+      // shapes depending on version / project config. Match defensively.
+      const msg          = otpError.message ?? ''
+      const lower        = msg.toLowerCase()
+      const isUserMissing =
+           lower.includes('signups not allowed')
+        || lower.includes('not allowed')
+        || lower.includes('user not found')
+        || lower.includes('not authorized')
+        || lower.includes('does not exist')
+
+      setMagicError(
+        isUserMissing
+          ? 'No account found with that email. Please sign up first.'
+          : msg
+      )
+      return
+    }
     setMagicSent(true)
   }
 
@@ -167,74 +199,78 @@ export default function Login() {
             </button>
           </form>
 
-          {/* ── Magic-link section ──────────────────────────────────────── */}
-          <div className="flex items-center gap-3 my-5">
-            <div className="flex-1 h-px bg-slate-200" />
-            <span className="text-xs text-slate-400 font-medium">or</span>
-            <div className="flex-1 h-px bg-slate-200" />
-          </div>
-
-          {magicSent ? (
-            <div className="text-center py-2 px-1 animate-fade-in" role="status" aria-live="polite">
-              <div className="w-14 h-14 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-3">
-                <span className="text-2xl select-none" aria-hidden="true">📧</span>
-              </div>
-              <p className="text-sm font-bold text-slate-800 mb-1">Check your email</p>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                We sent a sign-in link to{' '}
-                <span className="font-semibold text-slate-700 break-all">{email}</span>.
-                Click it to sign in.
-              </p>
-              <button
-                type="button"
-                onClick={() => { setMagicSent(false); setMagicError('') }}
-                className="mt-3 text-xs text-blue-600 hover:text-blue-700 font-semibold underline"
-              >
-                Use a different email
-              </button>
-            </div>
-          ) : (
-            <form onSubmit={handleMagicLink} className="space-y-3">
-              <div>
-                <label htmlFor="magic-email" className={labelClass}>
-                  Email for magic link
-                </label>
-                <input
-                  id="magic-email"
-                  name="magic-email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  className={inputClass}
-                />
+          {/* ── Magic-link section (Sign In tab only) ───────────────────── */}
+          {tab === 'signin' && (
+            <>
+              <div className="flex items-center gap-3 my-5">
+                <div className="flex-1 h-px bg-slate-200" />
+                <span className="text-xs text-slate-400 font-medium">or</span>
+                <div className="flex-1 h-px bg-slate-200" />
               </div>
 
-              {magicError && (
-                <p className="text-sm text-red-600 bg-red-50 border border-red-100 px-3 py-2 rounded-lg">
-                  {magicError}
-                </p>
+              {magicSent ? (
+                <div className="text-center py-2 px-1 animate-fade-in" role="status" aria-live="polite">
+                  <div className="w-14 h-14 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <span className="text-2xl select-none" aria-hidden="true">📧</span>
+                  </div>
+                  <p className="text-sm font-bold text-slate-800 mb-1">Check your email</p>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    We sent a sign-in link to{' '}
+                    <span className="font-semibold text-slate-700 break-all">{email}</span>.
+                    Click it to sign in.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setMagicSent(false); setMagicError('') }}
+                    className="mt-3 text-xs text-blue-600 hover:text-blue-700 font-semibold underline"
+                  >
+                    Use a different email
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleMagicLink} className="space-y-3">
+                  <div>
+                    <label htmlFor="magic-email" className={labelClass}>
+                      Email for magic link
+                    </label>
+                    <input
+                      id="magic-email"
+                      name="magic-email"
+                      type="email"
+                      autoComplete="email"
+                      required
+                      placeholder="you@example.com"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      className={inputClass}
+                    />
+                  </div>
+
+                  {magicError && (
+                    <p className="text-sm text-red-600 bg-red-50 border border-red-100 px-3 py-2 rounded-lg">
+                      {magicError}
+                    </p>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={magicLoading}
+                    className="w-full py-3 border-2 border-blue-500 text-blue-600 hover:bg-blue-50 font-bold rounded-xl text-sm transition-all btn-press disabled:opacity-70 flex items-center justify-center gap-2"
+                  >
+                    {magicLoading
+                      ? <>
+                          <div className="w-4 h-4 border-2 border-blue-600/40 border-t-blue-600 rounded-full animate-spin" />
+                          Sending…
+                        </>
+                      : <>
+                          <span aria-hidden="true">✨</span>
+                          Send Magic Link
+                        </>
+                    }
+                  </button>
+                </form>
               )}
-
-              <button
-                type="submit"
-                disabled={magicLoading}
-                className="w-full py-3 border-2 border-blue-500 text-blue-600 hover:bg-blue-50 font-bold rounded-xl text-sm transition-all btn-press disabled:opacity-70 flex items-center justify-center gap-2"
-              >
-                {magicLoading
-                  ? <>
-                      <div className="w-4 h-4 border-2 border-blue-600/40 border-t-blue-600 rounded-full animate-spin" />
-                      Sending…
-                    </>
-                  : <>
-                      <span aria-hidden="true">✨</span>
-                      Send Magic Link
-                    </>
-                }
-              </button>
-            </form>
+            </>
           )}
 
           {/* ── OAuth section ───────────────────────────────────────────── */}
