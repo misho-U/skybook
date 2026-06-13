@@ -58,16 +58,18 @@ export default function Login() {
   }
 
   /**
-   * Send a magic-link email via Supabase Auth.  No password is exchanged.
-   * The user clicks the link in their inbox → Supabase verifies → redirects
-   * to `emailRedirectTo` → AuthContext's `onAuthStateChange` listener picks
-   * up the new session automatically, no extra page or callback needed.
+   * Trigger a branded magic-link email via the `send-magic-link` edge function.
+   * The function:
+   *   1. Calls supabase.auth.admin.generateLink (service-role) to get a token
+   *   2. Sends a SkyBook-branded HTML email via Resend (onboarding@resend.dev)
+   *
+   * After the user clicks the link in their inbox, Supabase verifies and
+   * redirects to `redirectTo`; AuthContext's onAuthStateChange listener picks
+   * up the new session — no extra page or callback wiring needed.
    *
    * Tab-aware behaviour:
-   *   - Sign In tab: `shouldCreateUser: false` — rejects unknown emails so
-   *     the magic link can't double as a hidden sign-up channel.
-   *   - Sign Up tab: `shouldCreateUser: true` — magic link IS the sign-up
-   *     method. New accounts are created when the user clicks the link.
+   *   - Sign In tab: type='magiclink' (rejects unknown emails)
+   *   - Sign Up tab: type='signup' with fallback to magiclink for existing accounts
    */
   async function handleMagicLink(e) {
     e.preventDefault()
@@ -78,34 +80,44 @@ export default function Login() {
       return
     }
 
-    const isSignup = tab === 'signup'
+    const isSignup   = tab === 'signup'
+    const redirectTo = window.location.origin + (from === '/login' ? '/' : from)
 
     setMagicLoading(true)
-    const { error: otpError } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        shouldCreateUser: isSignup,
-        // After the user clicks the email link, Supabase bounces them here.
-        // Use the live origin so localhost dev works without env config.
-        // (Both this URL and the production URL must be on the allow-list in
-        //  Supabase → Authentication → URL Configuration → Redirect URLs.)
-        emailRedirectTo: window.location.origin + (from === '/login' ? '/' : from),
-      },
+    const { data, error: fnError } = await supabase.functions.invoke('send-magic-link', {
+      body: { email, redirectTo, isSignUp: isSignup },
     })
     setMagicLoading(false)
 
-    if (otpError) {
-      // On the Sign In tab, Supabase signals "no account exists" through a
-      // few different message shapes — match defensively and translate to a
-      // friendly message. On the Sign Up tab we don't expect this class of
-      // error (creation is allowed), so we pass the raw message through.
-      const msg   = otpError.message ?? ''
-      const lower = msg.toLowerCase()
+    // ── Error extraction ─────────────────────────────────────────────────
+    // supabase.functions.invoke surfaces non-2xx as `fnError` (a
+    // FunctionsHttpError whose .context is the raw Response). The actual
+    // `{ error, message }` body from our edge function needs to be parsed
+    // out of that Response. Both shapes handled here.
+    let errorMessage = null
+    if (fnError) {
+      errorMessage = fnError.message
+      try {
+        const body = await fnError.context?.json?.()
+        if (body?.message) errorMessage = body.message
+        else if (body?.error) errorMessage = body.error
+      } catch { /* keep the generic fnError.message */ }
+    } else if (data?.error) {
+      // Edge function returned 2xx with a structured error (shouldn't happen
+      // given our current contract, but handle it for robustness)
+      errorMessage = data.message ?? data.error
+    }
+
+    if (errorMessage) {
+      // Translate "user does not exist" variants into a friendly message —
+      // only on the Sign In tab (Sign Up is allowed to create).
+      const lower = errorMessage.toLowerCase()
       const isUserMissing =
         !isSignup && (
-             lower.includes('signups not allowed')
+             lower.includes('user not found')
+          || lower.includes('not found')
+          || lower.includes('signups not allowed')
           || lower.includes('not allowed')
-          || lower.includes('user not found')
           || lower.includes('not authorized')
           || lower.includes('does not exist')
         )
@@ -113,10 +125,11 @@ export default function Login() {
       setMagicError(
         isUserMissing
           ? 'No account found with that email. Please sign up first.'
-          : msg
+          : errorMessage
       )
       return
     }
+
     setMagicSent(true)
   }
 
