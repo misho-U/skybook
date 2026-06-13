@@ -20,7 +20,10 @@ Deno.serve(async (req) => {
     const { to, bookingRef, tripType, passengers, flights, seats, totalPrice } = body
 
     if (!to || !bookingRef || !flights?.outbound) {
-      return json({ error: 'Missing required fields: to, bookingRef, flights.outbound' }, 400)
+      return json({
+        error:   'missing_fields',
+        message: 'Required fields: to, bookingRef, flights.outbound.',
+      }, 400)
     }
 
     const payload: EmailPayload = { bookingRef, tripType, passengers, flights, seats, totalPrice }
@@ -43,12 +46,19 @@ Deno.serve(async (req) => {
     if (!resendRes.ok) {
       const detail = await resendRes.text()
       console.error('Resend error:', detail)
-      return json({ error: 'Email provider error', detail }, 502)
+      return json({
+        error:   'email_provider_failed',
+        message: 'Resend rejected the email send request.',
+        details: detail,
+      }, 502)
     }
 
     return json({ success: true })
   } catch (err) {
-    console.error('Edge function error:', err)
-    return json({ error: String(err) }, 500)
+    console.error('send-booking-email error:', err)
+    return json({
+      error:   'internal_error',
+      message: 'Internal server error while sending the confirmation email.',
+    }, 500)
   }
 })

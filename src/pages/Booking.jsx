@@ -69,7 +69,7 @@ export default function Booking() {
   const infants     = Math.min(9, Math.max(0, parseInt(searchParams.get('infants')  || '0', 10)))
   const seatsNeeded = adults + children
 
-  const STEPS = buildSteps(isRoundTrip)
+  const STEPS = useMemo(() => buildSteps(isRoundTrip), [isRoundTrip])
 
   const [outboundFlight, setOutboundFlight] = useState(null)
   const [returnFlight,   setReturnFlight]   = useState(null)
@@ -159,12 +159,14 @@ export default function Booking() {
 
   // Non-blocking: just a flag so we can show an info banner.
   // The user can still complete the booking — FlightCard already warned them.
-  const bookedFlightIds = (() => {
-    try { return JSON.parse(localStorage.getItem('skybook_flight_ids') || '[]') }
-    catch { return [] }
-  })()
-  const isAlreadyBooked = bookedFlightIds.includes(outboundId)
-    || (isRoundTrip && returnId && bookedFlightIds.includes(returnId))
+  // Memoised so we don't reparse localStorage every render.
+  const isAlreadyBooked = useMemo(() => {
+    let ids = []
+    try { ids = JSON.parse(localStorage.getItem('skybook_flight_ids') || '[]') }
+    catch { /* empty */ }
+    return ids.includes(outboundId)
+      || (isRoundTrip && returnId && ids.includes(returnId))
+  }, [outboundId, returnId, isRoundTrip])
 
   // Step indices (1-based)
   // One-way:    1=Seat, 2=Luggage, 3=Passenger, 4=Confirm
@@ -175,9 +177,9 @@ export default function Booking() {
 
   /**
    * Stashes the booking inputs in sessionStorage and navigates to /payment.
-   * The trip is NOT persisted to Supabase yet — that happens in PaymentResult.jsx
-   * only after Flitt approves the payment.  This avoids stranded trip rows when
-   * the user abandons or fails payment.
+   * The trip is NOT persisted to Supabase yet — that happens in finalizeBooking()
+   * which is invoked from Payment.jsx after Flitt approves the payment. This
+   * avoids stranded trip rows when the user abandons or fails payment.
    */
   function handleConfirm(total) {
     setIsConfirming(true)

@@ -10,4 +10,13 @@ if (!supabaseUrl || !supabaseKey) {
   )
 }
 
+/**
+ * Shared Supabase client used everywhere in the frontend.
+ *
+ * Configured with the **anon** key, so every query is subject to Row Level
+ * Security. Service-role operations live exclusively in edge functions
+ * (`supabase/functions/*`) and must never be performed from the browser.
+ *
+ * @type {import('@supabase/supabase-js').SupabaseClient}
+ */
 export const supabase = createClient(supabaseUrl, supabaseKey)

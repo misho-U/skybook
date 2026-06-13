@@ -1,20 +1,34 @@
 import { supabase } from './supabase'
 
-/** Supabase select string for flights with disambiguated FK joins. */
+/**
+ * PostgREST `select=` string for the `flights` table with disambiguated FK
+ * joins to `airports`. The FK names (`fk_origin` / `fk_destination`) are
+ * required because both relations point at the same parent table.
+ *
+ * @example
+ *   supabase.from('flights').select(FLIGHT_SELECT).eq('id', flightId).single()
+ *
+ * @type {string}
+ */
 export const FLIGHT_SELECT = '*, origin:airports!fk_origin(*), destination:airports!fk_destination(*)'
 
-/** Read locally-stored trip references from localStorage. */
-export function getLocalTrips() {
-  try { return JSON.parse(localStorage.getItem('skybook_trips') || '[]') }
-  catch { return [] }
-}
-
 /**
- * Fetches departure dates with at least one flight on the given route.
- * Uses a two-step city→UUID lookup to avoid unreliable PostgREST join-column
- * filtering with .ilike() on embedded resources.
- * @param {{ origin: string, destination: string, afterDate?: string, swapped?: boolean }} opts
- * @returns {Promise<Set<string>>} Set of 'YYYY-MM-DD' strings
+ * Fetch the set of departure dates that have at least one available flight
+ * for the given route. Used by the Home and SearchResults date pickers to
+ * gray out days with no flights.
+ *
+ * Uses a two-step `city → UUID` lookup against `airports` to avoid the
+ * PostgREST limitation where `.ilike()` on an embedded resource doesn't
+ * filter the parent rows reliably.
+ *
+ * @param {Object}   opts
+ * @param {string}   opts.origin       City name of the origin (case-insensitive). Optional.
+ * @param {string}   opts.destination  City name of the destination. Optional.
+ * @param {string=}  opts.afterDate    YYYY-MM-DD; only return dates strictly after this day.
+ * @param {boolean=} opts.swapped      If true, swap origin/destination — used for
+ *                                     return-leg availability on round trips.
+ * @returns {Promise<Set<string>>}     Set of 'YYYY-MM-DD' strings. Empty set if either
+ *                                     city isn't found.
  */
 export async function fetchAvailableDates({ origin, destination, afterDate, swapped = false }) {
   const orig = swapped ? destination : origin

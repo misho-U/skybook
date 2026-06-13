@@ -25,7 +25,6 @@ export function AuthProvider({ children }) {
 
   async function signOut() {
     await supabase.auth.signOut()
-    localStorage.removeItem('skybook_trips')
   }
 
   return (

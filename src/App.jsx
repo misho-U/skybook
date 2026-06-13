@@ -1,16 +1,24 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import { ToastProvider } from './context/ToastContext'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Navbar from './components/Navbar'
+
+// Eagerly loaded — the landing page and auth screens are part of the
+// minimal first-paint bundle.
 import Home from './pages/Home'
 import Login from './pages/Login'
-import MyBookings from './pages/MyBookings'
-import SearchResults from './pages/SearchResults'
-import Booking from './pages/Booking'
-import Payment from './pages/Payment'
-import PaymentResult from './pages/PaymentResult'
 import NotFound from './pages/NotFound'
+
+// Lazy-loaded — these pages are only reached after the user has navigated
+// past the landing page, so they don't need to be in the initial bundle.
+// Saves ~60-80 KB gzipped of JS (Payment.jsx alone pulls in the Flitt SDK
+// loader + finalizeBooking + PaymentResult helpers).
+const SearchResults  = lazy(() => import('./pages/SearchResults'))
+const MyBookings     = lazy(() => import('./pages/MyBookings'))
+const Booking        = lazy(() => import('./pages/Booking'))
+const Payment        = lazy(() => import('./pages/Payment'))
+const PaymentResult  = lazy(() => import('./pages/PaymentResult'))
 
 function ScrollToTop() {
   const { pathname } = useLocation()
@@ -37,6 +45,16 @@ function ProtectedRoute({ children }) {
   return children
 }
 
+/** Spinner shown while a lazy route chunk is downloading. */
+function RouteFallback() {
+  return (
+    <main className="flex items-center justify-center py-32" aria-live="polite" aria-busy="true">
+      <div className="w-10 h-10 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin" />
+      <span className="sr-only">Loading page…</span>
+    </main>
+  )
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -46,16 +64,18 @@ export default function App() {
             <Navbar />
             <div className="flex-1">
               <ScrollToTop />
-              <Routes>
-                <Route path="/"             element={<Home />}          />
-                <Route path="/login"        element={<Login />}         />
-                <Route path="/my-bookings"  element={<MyBookings />}    />
-                <Route path="/results"      element={<SearchResults />} />
-                <Route path="/booking"        element={<ProtectedRoute><Booking /></ProtectedRoute>} />
-                <Route path="/payment"        element={<ProtectedRoute><Payment /></ProtectedRoute>} />
-                <Route path="/payment-result" element={<ProtectedRoute><PaymentResult /></ProtectedRoute>} />
-                <Route path="*"               element={<NotFound />} />
-              </Routes>
+              <Suspense fallback={<RouteFallback />}>
+                <Routes>
+                  <Route path="/"             element={<Home />}          />
+                  <Route path="/login"        element={<Login />}         />
+                  <Route path="/my-bookings"  element={<MyBookings />}    />
+                  <Route path="/results"      element={<SearchResults />} />
+                  <Route path="/booking"        element={<ProtectedRoute><Booking /></ProtectedRoute>} />
+                  <Route path="/payment"        element={<ProtectedRoute><Payment /></ProtectedRoute>} />
+                  <Route path="/payment-result" element={<ProtectedRoute><PaymentResult /></ProtectedRoute>} />
+                  <Route path="*"               element={<NotFound />} />
+                </Routes>
+              </Suspense>
             </div>
 
             <footer className="bg-white border-t border-slate-100 py-8 mt-auto">

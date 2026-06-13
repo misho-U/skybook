@@ -13,6 +13,39 @@ const LUGGAGE_LABEL = {
   family:     { icon: '🧳🧳', name: 'Family'   },
 }
 
+/**
+ * Skeleton card mirroring the shape of a real booking row — three are shown
+ * while trips are being fetched. Avoids the layout pop that a centered
+ * spinner causes when the list snaps in.
+ */
+function BookingSkeleton() {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden animate-pulse">
+      <div className="h-1 bg-gradient-to-r from-slate-100 to-slate-200" />
+      <div className="p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex gap-2">
+            <div className="h-6 w-24 bg-slate-100 rounded-full" />
+            <div className="h-6 w-32 bg-slate-100 rounded-full" />
+          </div>
+          <div className="h-7 w-20 bg-slate-100 rounded" />
+        </div>
+        <div className="space-y-2 mb-4">
+          <div className="h-4 w-2/3 bg-slate-100 rounded" />
+          <div className="h-3 w-1/2 bg-slate-100 rounded" />
+        </div>
+        <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 flex items-start gap-3">
+          <div className="w-16 h-12 bg-slate-200 rounded-lg shrink-0" />
+          <div className="flex-1 space-y-2">
+            <div className="h-3 w-1/2 bg-slate-100 rounded" />
+            <div className="h-3 w-1/3 bg-slate-100 rounded" />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function EmptyState() {
   return (
     <div className="flex flex-col items-center justify-center py-28 bg-white rounded-2xl border border-slate-100 shadow-sm text-center px-4 animate-fade-in">
@@ -223,9 +256,6 @@ export default function MyBookings() {
         await supabase.from('seats').update({ is_occupied: false }).in('id', trip.allSeatIds)
       }
 
-      // Wipe the legacy local-trip ref cache entirely
-      localStorage.removeItem('skybook_trips')
-
       // Prune this trip's flight IDs from the booked-IDs list so the
       // "Booked" badge disappears from those flight cards on Home/Results
       const cancelledFlightIds = [
@@ -263,9 +293,11 @@ export default function MyBookings() {
       </div>
 
       {loading ? (
-        <div className="flex flex-col items-center py-32 gap-4">
-          <div className="w-12 h-12 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin" />
-          <p className="text-slate-400 text-sm font-medium">Loading bookings…</p>
+        <div className="space-y-5" aria-live="polite" aria-busy="true">
+          <span className="sr-only">Loading your bookings…</span>
+          <BookingSkeleton />
+          <BookingSkeleton />
+          <BookingSkeleton />
         </div>
       ) : trips.length === 0 ? (
         <EmptyState />

@@ -65,7 +65,9 @@ async function verifySignature(
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
-  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
+  if (req.method !== 'POST') {
+    return json({ error: 'method_not_allowed', message: 'Use POST.' }, 405)
+  }
 
   try {
     const body = await req.json()
@@ -82,7 +84,10 @@ Deno.serve(async (req) => {
     }
 
     if (!order_id || !order_status) {
-      return json({ error: 'Missing order_id or order_status' }, 400)
+      return json({
+        error:   'missing_fields',
+        message: 'Required fields: order_id, order_status.',
+      }, 400)
     }
 
     // --- Signature verification (non-blocking unless FLITT_STRICT_SIG=true) ---
@@ -95,7 +100,10 @@ Deno.serve(async (req) => {
       } else {
         console.error('[flitt-callback] Signature MISMATCH for order', order_id, '·', note)
         if (strictSig) {
-          return json({ error: 'Invalid signature' }, 400)
+          return json({
+            error:   'invalid_signature',
+            message: 'Signature does not match expected hash.',
+          }, 400)
         }
         // Non-strict mode: log and continue. Trust the callback payload —
         // useful while Flitt's signature format drifts between SDK versions.
@@ -130,7 +138,10 @@ Deno.serve(async (req) => {
 
     if (intentErr) {
       console.error('payment_intents update error:', intentErr)
-      return json({ error: 'Failed to update payment intent' }, 500)
+      return json({
+        error:   'intent_update_failed',
+        message: 'Failed to update payment_intents.',
+      }, 500)
     }
 
     const rowsTouched = updatedRows?.length ?? 0
@@ -160,7 +171,10 @@ Deno.serve(async (req) => {
         )
       if (upsertErr) {
         console.error('payment_intents upsert error:', upsertErr)
-        return json({ error: 'Failed to upsert payment intent' }, 500)
+        return json({
+          error:   'intent_upsert_failed',
+          message: 'Failed to upsert payment_intents.',
+        }, 500)
       }
     }
 
@@ -179,6 +193,9 @@ Deno.serve(async (req) => {
     return json({ status: 'ok', intent_status: intentStatus })
   } catch (err) {
     console.error('flitt-callback error:', err)
-    return json({ error: 'Internal server error' }, 500)
+    return json({
+      error:   'internal_error',
+      message: 'Internal server error in flitt-callback.',
+    }, 500)
   }
 })

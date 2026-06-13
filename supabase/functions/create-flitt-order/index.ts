@@ -36,13 +36,18 @@ async function buildSignature(
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
-  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
+  if (req.method !== 'POST') {
+    return json({ error: 'method_not_allowed', message: 'Use POST.' }, 405)
+  }
 
   try {
     const { tripId, amount, orderDesc, responseUrl } = await req.json()
 
     if (!tripId || amount == null) {
-      return json({ error: 'Missing required fields: tripId, amount' }, 400)
+      return json({
+        error:   'missing_fields',
+        message: 'Required fields: tripId, amount.',
+      }, 400)
     }
 
     const secretKey   = Deno.env.get('FLITT_SECRET_KEY')  ?? 'test'
@@ -74,8 +79,11 @@ Deno.serve(async (req) => {
 
     const { signature, stringToHash } = await buildSignature(secretKey, params)
 
-    console.log('[Flitt] String being hashed:', stringToHash)
-    console.log('[Flitt] Computed signature :', signature)
+    // SECURITY: stringToHash begins with the raw secret key. Redact it before
+    // logging so the secret never appears in dashboard / log-export pipelines.
+    const redactedHashInput = stringToHash.replace(secretKey, '<REDACTED>')
+    console.log('[Flitt] String being hashed (redacted):', redactedHashInput)
+    console.log('[Flitt] Computed signature           :', signature)
 
     const flittRes = await fetch('https://pay.flitt.com/api/checkout/token', {
       method: 'POST',
@@ -87,7 +95,11 @@ Deno.serve(async (req) => {
 
     if (flittData?.response?.response_status !== 'success') {
       console.error('[Flitt] Token request failed:', JSON.stringify(flittData))
-      return json({ error: 'Flitt rejected the order', details: flittData }, 502)
+      return json({
+        error:   'flitt_rejected',
+        message: 'Flitt rejected the order — see details.',
+        details: flittData,
+      }, 502)
     }
 
     const token = flittData.response.token as string
@@ -109,6 +121,9 @@ Deno.serve(async (req) => {
     return json({ token, orderId: tripId })
   } catch (err) {
     console.error('create-flitt-order error:', err)
-    return json({ error: 'Internal server error' }, 500)
+    return json({
+      error:   'internal_error',
+      message: 'Internal server error while creating the Flitt order.',
+    }, 500)
   }
 })

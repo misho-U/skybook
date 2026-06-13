@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import DobPicker from '../DobPicker'
 
 export const TYPE_LABEL = { adult: 'Adult', child: 'Child', infant: 'Infant' }
 export const TYPE_BADGE = {
@@ -22,7 +23,7 @@ function isoDateYearsAgo(years) {
 
 const TODAY_ISO = new Date().toISOString().split('T')[0]
 
-/** Min/max attributes for the native date input, by passenger type. */
+/** Lower/upper YYYY-MM-DD bounds passed to DobPicker, by passenger type. */
 function dobBounds(type) {
   if (type === 'infant') {
     return { min: isoDateYearsAgo(2), max: TODAY_ISO }
@@ -31,38 +32,55 @@ function dobBounds(type) {
   return { min: '1930-01-01', max: TODAY_ISO }
 }
 
+/**
+ * Wrapper around the custom DobPicker that maps passenger type to:
+ *  - min/max date range (infants: ≤ 2y old; adults/children: 1930–today)
+ *  - initial calendar view (start the picker at a reasonable age, not 25 yrs
+ *    in the future of an infant's possible birth date)
+ */
+const INITIAL_AGE_OFFSET = { adult: 25, child: 8, infant: 1 }
+
 function DobInput({ value, passengerType, onChange, error, id }) {
   const { min, max } = dobBounds(passengerType)
   return (
-    <input
+    <DobPicker
       id={id}
-      type="date"
-      value={value || ''}
+      value={value}
+      onChange={onChange}
       min={min}
       max={max}
-      onChange={e => onChange(e.target.value)}
-      className={`w-full px-4 py-3 rounded-xl border text-sm text-slate-800 transition-all duration-200 focus:outline-none focus:ring-2 ${
-        error
-          ? 'border-red-400 focus:ring-red-300 bg-red-50/60'
-          : 'border-slate-200 focus:ring-blue-500 focus:border-transparent bg-white'
-      }`}
+      hasError={!!error}
+      defaultViewYearsAgo={INITIAL_AGE_OFFSET[passengerType] ?? 25}
+      placeholder="Select date of birth"
     />
   )
 }
 
-function Field({ label, id, type = 'text', value, onChange, error, placeholder }) {
+function Field({ label, id, type = 'text', value, onChange, error, placeholder, autoComplete, name }) {
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-semibold text-slate-700 mb-1.5">{label}</label>
       <input
-        id={id} type={type} value={value} onChange={onChange} placeholder={placeholder}
+        id={id}
+        name={name ?? id}
+        type={type}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        aria-invalid={error ? 'true' : undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
         className={`w-full px-4 py-3 rounded-xl border text-sm text-slate-800 transition-all duration-200 focus:outline-none focus:ring-2 ${
           error
             ? 'border-red-400 focus:ring-red-300 bg-red-50/60'
             : 'border-slate-200 focus:ring-blue-500 focus:border-transparent bg-white'
         }`}
       />
-      {error && <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1"><span>⚠</span> {error}</p>}
+      {error && (
+        <p id={`${id}-error`} className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
+          <span aria-hidden="true">⚠</span> {error}
+        </p>
+      )}
     </div>
   )
 }
@@ -163,10 +181,10 @@ export default function StepPassengerInfo({
         <div className="border border-slate-100 rounded-2xl p-4">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Contact Details</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Email address" id="contact-email" type="email" value={contact.email}
+            <Field label="Email address" id="contact-email" type="email" autoComplete="email" value={contact.email}
               onChange={e => { setContact(p => ({ ...p, email: e.target.value })); clearErr('contact.email') }}
               error={errors['contact.email']} placeholder="jane@example.com" />
-            <Field label="Phone number" id="contact-phone" type="tel" value={contact.phone}
+            <Field label="Phone number" id="contact-phone" type="tel" autoComplete="tel" value={contact.phone}
               onChange={e => { setContact(p => ({ ...p, phone: e.target.value })); clearErr('contact.phone') }}
               error={errors['contact.phone']} placeholder="+1 555 000 0000" />
           </div>

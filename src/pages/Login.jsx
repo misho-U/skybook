@@ -70,20 +70,49 @@ export default function Login() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className={labelClass}>Email</label>
-              <input type="email" required placeholder="you@example.com"
-                value={email} onChange={e => setEmail(e.target.value)} className={inputClass} />
+              <label htmlFor="login-email" className={labelClass}>Email</label>
+              <input
+                id="login-email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                required
+                placeholder="you@example.com"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                className={inputClass}
+              />
             </div>
             <div>
-              <label className={labelClass}>Password</label>
-              <input type="password" required placeholder="••••••••" minLength={6}
-                value={password} onChange={e => setPassword(e.target.value)} className={inputClass} />
+              <label htmlFor="login-password" className={labelClass}>Password</label>
+              <input
+                id="login-password"
+                name="password"
+                type="password"
+                autoComplete={tab === 'signin' ? 'current-password' : 'new-password'}
+                required
+                placeholder="••••••••"
+                minLength={6}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                className={inputClass}
+              />
             </div>
             {tab === 'signup' && (
               <div>
-                <label className={labelClass}>Confirm Password</label>
-                <input type="password" required placeholder="••••••••" minLength={6}
-                  value={confirm} onChange={e => setConfirm(e.target.value)} className={inputClass} />
+                <label htmlFor="login-confirm" className={labelClass}>Confirm Password</label>
+                <input
+                  id="login-confirm"
+                  name="confirm-password"
+                  type="password"
+                  autoComplete="new-password"
+                  required
+                  placeholder="••••••••"
+                  minLength={6}
+                  value={confirm}
+                  onChange={e => setConfirm(e.target.value)}
+                  className={inputClass}
+                />
               </div>
             )}
 

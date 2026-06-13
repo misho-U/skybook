@@ -251,10 +251,7 @@ export default function Home() {
           className="absolute inset-0 w-full h-full object-cover"
           aria-hidden="true"
         >
-          <source
-            src="https://videos.pexels.com/video-files/854671/854671-hd_1920_1080_30fps.mp4"
-            type="video/mp4"
-          />
+          <source src="/hero.mp4" type="video/mp4" />
         </video>
 
         {/* Dark overlay so white text stays readable on top of footage */}

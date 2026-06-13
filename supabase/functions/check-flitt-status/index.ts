@@ -51,11 +51,15 @@ const ENDPOINTS = [
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
-  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
+  if (req.method !== 'POST') {
+    return json({ error: 'method_not_allowed', message: 'Use POST.' }, 405)
+  }
 
   try {
     const { orderId } = await req.json()
-    if (!orderId) return json({ error: 'Missing orderId' }, 400)
+    if (!orderId) {
+      return json({ error: 'missing_fields', message: 'orderId is required.' }, 400)
+    }
 
     const secretKey  = Deno.env.get('FLITT_SECRET_KEY')  ?? 'test'
     const merchantId = Deno.env.get('FLITT_MERCHANT_ID') ?? '1549901'
@@ -102,11 +106,18 @@ Deno.serve(async (req) => {
     }
 
     return json(
-      { error: 'All Flitt status endpoints failed', details: lastErrorDetails },
+      {
+        error:   'flitt_unreachable',
+        message: 'All Flitt status endpoints failed.',
+        details: lastErrorDetails,
+      },
       502,
     )
   } catch (err) {
     console.error('check-flitt-status error:', err)
-    return json({ error: 'Internal server error' }, 500)
+    return json({
+      error:   'internal_error',
+      message: 'Internal server error while checking Flitt order status.',
+    }, 500)
   }
 })
