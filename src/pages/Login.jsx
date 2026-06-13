@@ -15,7 +15,6 @@ export default function Login() {
   const [tab,       setTab]       = useState('signin')
   const [email,     setEmail]     = useState('')
   const [password,  setPassword]  = useState('')
-  const [confirm,   setConfirm]   = useState('')
   const [error,     setError]     = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
@@ -34,21 +33,20 @@ export default function Login() {
     setMagicError('')
   }
 
+  /**
+   * Sign-in via email + password. Only invoked from the Sign In tab — the
+   * Sign Up tab uses magic-link only, so password-based account creation no
+   * longer happens through this page.
+   */
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
 
-    if (tab === 'signup' && password !== confirm) {
-      setError('Passwords do not match.')
-      return
-    }
-
     setIsLoading(true)
-    const { error: authError } = tab === 'signin'
-      ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password })
+    const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
+    setIsLoading(false)
 
-    if (authError) { setError(authError.message); setIsLoading(false); return }
+    if (authError) { setError(authError.message); return }
     navigate(from, { replace: true })
   }
 
@@ -65,9 +63,11 @@ export default function Login() {
    * to `emailRedirectTo` → AuthContext's `onAuthStateChange` listener picks
    * up the new session automatically, no extra page or callback needed.
    *
-   * `shouldCreateUser: false` means Supabase will reject the request with an
-   * error if no account exists for the email. Magic link is a sign-IN flow
-   * only — new users must use the Sign Up tab first.
+   * Tab-aware behaviour:
+   *   - Sign In tab: `shouldCreateUser: false` — rejects unknown emails so
+   *     the magic link can't double as a hidden sign-up channel.
+   *   - Sign Up tab: `shouldCreateUser: true` — magic link IS the sign-up
+   *     method. New accounts are created when the user clicks the link.
    */
   async function handleMagicLink(e) {
     e.preventDefault()
@@ -78,13 +78,13 @@ export default function Login() {
       return
     }
 
+    const isSignup = tab === 'signup'
+
     setMagicLoading(true)
     const { error: otpError } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        // Reject if the email isn't already registered. Prevents the magic
-        // link from doubling as a hidden sign-up channel.
-        shouldCreateUser: false,
+        shouldCreateUser: isSignup,
         // After the user clicks the email link, Supabase bounces them here.
         // Use the live origin so localhost dev works without env config.
         // (Both this URL and the production URL must be on the allow-list in
@@ -95,16 +95,20 @@ export default function Login() {
     setMagicLoading(false)
 
     if (otpError) {
-      // Supabase signals "no account exists" through a few different message
-      // shapes depending on version / project config. Match defensively.
-      const msg          = otpError.message ?? ''
-      const lower        = msg.toLowerCase()
+      // On the Sign In tab, Supabase signals "no account exists" through a
+      // few different message shapes — match defensively and translate to a
+      // friendly message. On the Sign Up tab we don't expect this class of
+      // error (creation is allowed), so we pass the raw message through.
+      const msg   = otpError.message ?? ''
+      const lower = msg.toLowerCase()
       const isUserMissing =
-           lower.includes('signups not allowed')
-        || lower.includes('not allowed')
-        || lower.includes('user not found')
-        || lower.includes('not authorized')
-        || lower.includes('does not exist')
+        !isSignup && (
+             lower.includes('signups not allowed')
+          || lower.includes('not allowed')
+          || lower.includes('user not found')
+          || lower.includes('not authorized')
+          || lower.includes('does not exist')
+        )
 
       setMagicError(
         isUserMissing
@@ -138,139 +142,145 @@ export default function Login() {
             ))}
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label htmlFor="login-email" className={labelClass}>Email</label>
-              <input
-                id="login-email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                placeholder="you@example.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label htmlFor="login-password" className={labelClass}>Password</label>
-              <input
-                id="login-password"
-                name="password"
-                type="password"
-                autoComplete={tab === 'signin' ? 'current-password' : 'new-password'}
-                required
-                placeholder="••••••••"
-                minLength={6}
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                className={inputClass}
-              />
-            </div>
-            {tab === 'signup' && (
+          {/* ── Password form (Sign In tab only) ────────────────────────── */}
+          {tab === 'signin' && (
+            <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label htmlFor="login-confirm" className={labelClass}>Confirm Password</label>
+                <label htmlFor="login-email" className={labelClass}>Email</label>
                 <input
-                  id="login-confirm"
-                  name="confirm-password"
-                  type="password"
-                  autoComplete="new-password"
+                  id="login-email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
                   required
-                  placeholder="••••••••"
-                  minLength={6}
-                  value={confirm}
-                  onChange={e => setConfirm(e.target.value)}
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
                   className={inputClass}
                 />
               </div>
-            )}
-
-            {error && (
-              <p className="text-sm text-red-600 bg-red-50 border border-red-100 px-3 py-2 rounded-lg">
-                {error}
-              </p>
-            )}
-
-            <button type="submit" disabled={isLoading}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition-all shadow-sm shadow-blue-200 btn-press disabled:opacity-70 flex items-center justify-center gap-2 mt-2">
-              {isLoading && <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
-              {tab === 'signin' ? 'Sign In' : 'Create Account'}
-            </button>
-          </form>
-
-          {/* ── Magic-link section (Sign In tab only) ───────────────────── */}
-          {tab === 'signin' && (
-            <>
-              <div className="flex items-center gap-3 my-5">
-                <div className="flex-1 h-px bg-slate-200" />
-                <span className="text-xs text-slate-400 font-medium">or</span>
-                <div className="flex-1 h-px bg-slate-200" />
+              <div>
+                <label htmlFor="login-password" className={labelClass}>Password</label>
+                <input
+                  id="login-password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  placeholder="••••••••"
+                  minLength={6}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  className={inputClass}
+                />
               </div>
 
-              {magicSent ? (
-                <div className="text-center py-2 px-1 animate-fade-in" role="status" aria-live="polite">
-                  <div className="w-14 h-14 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-3">
-                    <span className="text-2xl select-none" aria-hidden="true">📧</span>
-                  </div>
-                  <p className="text-sm font-bold text-slate-800 mb-1">Check your email</p>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    We sent a sign-in link to{' '}
-                    <span className="font-semibold text-slate-700 break-all">{email}</span>.
-                    Click it to sign in.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => { setMagicSent(false); setMagicError('') }}
-                    className="mt-3 text-xs text-blue-600 hover:text-blue-700 font-semibold underline"
-                  >
-                    Use a different email
-                  </button>
-                </div>
-              ) : (
-                <form onSubmit={handleMagicLink} className="space-y-3">
-                  <div>
-                    <label htmlFor="magic-email" className={labelClass}>
-                      Email for magic link
-                    </label>
-                    <input
-                      id="magic-email"
-                      name="magic-email"
-                      type="email"
-                      autoComplete="email"
-                      required
-                      placeholder="you@example.com"
-                      value={email}
-                      onChange={e => setEmail(e.target.value)}
-                      className={inputClass}
-                    />
-                  </div>
-
-                  {magicError && (
-                    <p className="text-sm text-red-600 bg-red-50 border border-red-100 px-3 py-2 rounded-lg">
-                      {magicError}
-                    </p>
-                  )}
-
-                  <button
-                    type="submit"
-                    disabled={magicLoading}
-                    className="w-full py-3 border-2 border-blue-500 text-blue-600 hover:bg-blue-50 font-bold rounded-xl text-sm transition-all btn-press disabled:opacity-70 flex items-center justify-center gap-2"
-                  >
-                    {magicLoading
-                      ? <>
-                          <div className="w-4 h-4 border-2 border-blue-600/40 border-t-blue-600 rounded-full animate-spin" />
-                          Sending…
-                        </>
-                      : <>
-                          <span aria-hidden="true">✨</span>
-                          Send Magic Link
-                        </>
-                    }
-                  </button>
-                </form>
+              {error && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-100 px-3 py-2 rounded-lg">
+                  {error}
+                </p>
               )}
-            </>
+
+              <button type="submit" disabled={isLoading}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition-all shadow-sm shadow-blue-200 btn-press disabled:opacity-70 flex items-center justify-center gap-2 mt-2">
+                {isLoading && <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                Sign In
+              </button>
+            </form>
+          )}
+
+          {/* ── Magic-link section (always visible — tab decides creation) ── */}
+
+          {/* The "or" divider only makes sense ABOVE the magic-link form when
+              there's another form on top of it. On the Sign Up tab the magic
+              link IS the form, so no divider. */}
+          {tab === 'signin' && (
+            <div className="flex items-center gap-3 my-5">
+              <div className="flex-1 h-px bg-slate-200" />
+              <span className="text-xs text-slate-400 font-medium">or</span>
+              <div className="flex-1 h-px bg-slate-200" />
+            </div>
+          )}
+
+          {magicSent ? (
+            <div className="text-center py-2 px-1 animate-fade-in" role="status" aria-live="polite">
+              <div className="w-14 h-14 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-3">
+                <span className="text-2xl select-none" aria-hidden="true">📧</span>
+              </div>
+              <p className="text-sm font-bold text-slate-800 mb-1">Check your email</p>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                {tab === 'signup'
+                  ? <>We sent a confirmation link to{' '}
+                      <span className="font-semibold text-slate-700 break-all">{email}</span>.
+                      Click it to create your account.
+                    </>
+                  : <>We sent a sign-in link to{' '}
+                      <span className="font-semibold text-slate-700 break-all">{email}</span>.
+                      Click it to sign in.
+                    </>
+                }
+              </p>
+              <button
+                type="button"
+                onClick={() => { setMagicSent(false); setMagicError('') }}
+                className="mt-3 text-xs text-blue-600 hover:text-blue-700 font-semibold underline"
+              >
+                Use a different email
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleMagicLink} className="space-y-3">
+              <div>
+                <label htmlFor="magic-email" className={labelClass}>
+                  {tab === 'signup' ? 'Email' : 'Email for magic link'}
+                </label>
+                <input
+                  id="magic-email"
+                  name="magic-email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+
+              {magicError && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-100 px-3 py-2 rounded-lg">
+                  {magicError}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={magicLoading}
+                className={
+                  // On Sign Up tab the magic link is the primary action →
+                  // filled blue. On Sign In tab it's secondary to the
+                  // password form above → outlined.
+                  tab === 'signup'
+                    ? 'w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition-all shadow-sm shadow-blue-200 btn-press disabled:opacity-70 flex items-center justify-center gap-2'
+                    : 'w-full py-3 border-2 border-blue-500 text-blue-600 hover:bg-blue-50 font-bold rounded-xl text-sm transition-all btn-press disabled:opacity-70 flex items-center justify-center gap-2'
+                }
+              >
+                {magicLoading
+                  ? <>
+                      <div className={`w-4 h-4 border-2 rounded-full animate-spin ${
+                        tab === 'signup'
+                          ? 'border-white/40 border-t-white'
+                          : 'border-blue-600/40 border-t-blue-600'
+                      }`} />
+                      Sending…
+                    </>
+                  : <>
+                      <span aria-hidden="true">✨</span>
+                      Send Magic Link
+                    </>
+                }
+              </button>
+            </form>
           )}
 
           {/* ── OAuth section ───────────────────────────────────────────── */}
